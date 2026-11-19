@@ -97,6 +97,30 @@ function getAuthContext(req) {
   };
 }
 
+// Role-Based Authorization Guard Helper
+function checkAuthRole(req, res, allowedRoles = []) {
+  const ctx = getAuthContext(req);
+  if (!ctx.user) {
+    res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      success: false,
+      error: 'UNAUTHORIZED',
+      message: '보드 제어 및 실행 권한이 없습니다. 상단에서 엔지니어(engineer) 또는 관리자(admin)로 로그인해주세요.'
+    }));
+    return null;
+  }
+  if (allowedRoles.length > 0 && !allowedRoles.includes(ctx.user.role)) {
+    res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      success: false,
+      error: 'FORBIDDEN',
+      message: `이 작업을 수행할 권한이 없습니다. (${allowedRoles.join(', ')} 전용)`
+    }));
+    return null;
+  }
+  return ctx;
+}
+
 // MIME types table
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -288,14 +312,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/admin/users/status' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin']);
+      if (!ctx) return;
       const body = await parseJsonBody(req);
       const result = authManager.updateUserStatus(body.username, body.status);
       if (result.success) {
         auditDb.recordLog({
-          userId: ctx.user ? ctx.user.id : 'admin',
-          userName: ctx.user ? ctx.user.name : '시스템 관리자',
-          userRole: 'admin',
+          userId: ctx.user.id,
+          userName: ctx.user.name,
+          userRole: ctx.user.role,
           boardId: ctx.boardId,
           boardName: ctx.boardName,
           category: 'SECURITY_AUDIT',
@@ -309,14 +334,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/admin/users/role' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin']);
+      if (!ctx) return;
       const body = await parseJsonBody(req);
       const result = authManager.updateUserRole(body.username, body.role);
       if (result.success) {
         auditDb.recordLog({
-          userId: ctx.user ? ctx.user.id : 'admin',
-          userName: ctx.user ? ctx.user.name : '시스템 관리자',
-          userRole: 'admin',
+          userId: ctx.user.id,
+          userName: ctx.user.name,
+          userRole: ctx.user.role,
           boardId: ctx.boardId,
           boardName: ctx.boardName,
           category: 'SECURITY_AUDIT',
@@ -330,7 +356,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/admin/logs/clear' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin']);
+      if (!ctx) return;
       const result = auditDb.clearLogs(ctx.user);
       return res.end(JSON.stringify(result));
     }
@@ -362,13 +389,14 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/board/reset - Reset Board Cores
     if (pathname === '/api/board/reset' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin', 'engineer']);
+      if (!ctx) return;
       const body = await parseJsonBody(req);
       const result = await board.resetBoard(body.target || 'all');
       auditDb.recordLog({
-        userId: ctx.user ? ctx.user.id : 'anonymous',
-        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
-        userRole: ctx.user ? ctx.user.role : 'guest',
+        userId: ctx.user.id,
+        userName: ctx.user.name,
+        userRole: ctx.user.role,
         boardId: ctx.boardId,
         boardName: ctx.boardName,
         category: 'BOARD_CONTROL',
@@ -382,13 +410,14 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/board/gpio - Control Single LED
     if (pathname === '/api/board/gpio' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin', 'engineer', 'qa']);
+      if (!ctx) return;
       const body = await parseJsonBody(req);
       const result = await board.setGpio(body.pin, body.value);
       auditDb.recordLog({
-        userId: ctx.user ? ctx.user.id : 'anonymous',
-        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
-        userRole: ctx.user ? ctx.user.role : 'guest',
+        userId: ctx.user.id,
+        userName: ctx.user.name,
+        userRole: ctx.user.role,
         boardId: ctx.boardId,
         boardName: ctx.boardName,
         category: 'BOARD_CONTROL',
@@ -402,14 +431,15 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/board/leds/all - Turn All LEDs ON or OFF
     if (pathname === '/api/board/leds/all' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin', 'engineer', 'qa']);
+      if (!ctx) return;
       const body = await parseJsonBody(req);
       const isTurnOn = body.turnOn === true || body.turnOn === 'true' || body.turnOn === 1;
       const result = await board.setAllLeds(isTurnOn);
       auditDb.recordLog({
-        userId: ctx.user ? ctx.user.id : 'anonymous',
-        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
-        userRole: ctx.user ? ctx.user.role : 'guest',
+        userId: ctx.user.id,
+        userName: ctx.user.name,
+        userRole: ctx.user.role,
         boardId: ctx.boardId,
         boardName: ctx.boardName,
         category: 'BOARD_CONTROL',
@@ -423,13 +453,14 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/board/button - Press Buttons
     if (pathname === '/api/board/button' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin', 'engineer', 'qa']);
+      if (!ctx) return;
       const body = await parseJsonBody(req);
       const result = await board.pressButton(body.button);
       auditDb.recordLog({
-        userId: ctx.user ? ctx.user.id : 'anonymous',
-        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
-        userRole: ctx.user ? ctx.user.role : 'guest',
+        userId: ctx.user.id,
+        userName: ctx.user.name,
+        userRole: ctx.user.role,
         boardId: ctx.boardId,
         boardName: ctx.boardName,
         category: 'BOARD_CONTROL',
@@ -443,13 +474,14 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/board/flash/erase - Erase Flash Memory
     if (pathname === '/api/board/flash/erase' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin', 'engineer']);
+      if (!ctx) return;
       const body = await parseJsonBody(req);
       const result = await board.eraseFlash(body.area || 'chip');
       auditDb.recordLog({
-        userId: ctx.user ? ctx.user.id : 'anonymous',
-        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
-        userRole: ctx.user ? ctx.user.role : 'guest',
+        userId: ctx.user.id,
+        userName: ctx.user.name,
+        userRole: ctx.user.role,
         boardId: ctx.boardId,
         boardName: ctx.boardName,
         category: 'FIRMWARE_FLASH',
@@ -463,13 +495,14 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/board/flash/program - Flash Sample Firmware
     if (pathname === '/api/board/flash/program' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin', 'engineer']);
+      if (!ctx) return;
       const body = await parseJsonBody(req);
       const result = await board.flashSample(body.sample || 'matter_light_bulb');
       auditDb.recordLog({
-        userId: ctx.user ? ctx.user.id : 'anonymous',
-        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
-        userRole: ctx.user ? ctx.user.role : 'guest',
+        userId: ctx.user.id,
+        userName: ctx.user.name,
+        userRole: ctx.user.role,
         boardId: ctx.boardId,
         boardName: ctx.boardName,
         category: 'FIRMWARE_FLASH',
@@ -511,13 +544,14 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/terminal/command - Execute CLI Command
     if (pathname === '/api/terminal/command' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin', 'engineer']);
+      if (!ctx) return;
       const body = await parseJsonBody(req);
       const response = board.processCommand(body.command);
       auditDb.recordLog({
-        userId: ctx.user ? ctx.user.id : 'anonymous',
-        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
-        userRole: ctx.user ? ctx.user.role : 'guest',
+        userId: ctx.user.id,
+        userName: ctx.user.name,
+        userRole: ctx.user.role,
         boardId: ctx.boardId,
         boardName: ctx.boardName,
         category: 'CLI_TOOL',
@@ -536,14 +570,15 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/matter/control - Control Light (Power, Level, Color, Kelvin)
     if (pathname === '/api/matter/control' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin', 'engineer', 'qa']);
+      if (!ctx) return;
       const body = await parseJsonBody(req);
       const result = matter.updateControl(body);
       board.addLog('INF', 'matter', `Matter Command applied: On=${result.state.onOff}, Level=${result.state.level}, Temp=${result.state.colorTemperatureKelvin}K, RGB=${result.state.rgbHex}`);
       auditDb.recordLog({
-        userId: ctx.user ? ctx.user.id : 'anonymous',
-        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
-        userRole: ctx.user ? ctx.user.role : 'guest',
+        userId: ctx.user.id,
+        userName: ctx.user.name,
+        userRole: ctx.user.role,
         boardId: ctx.boardId,
         boardName: ctx.boardName,
         category: 'MATTER_CLUSTER',
@@ -739,7 +774,8 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/samples/select - Select & Activate Sample Firmware
     if (pathname === '/api/samples/select' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin', 'engineer', 'qa']);
+      if (!ctx) return;
       const body = await parseJsonBody(req);
       const activeSample = samplesCatalog.setActiveSample(body.sampleId);
       if (board.appCore) {
@@ -749,9 +785,9 @@ const server = http.createServer(async (req, res) => {
       board.addLog('INF', 'samples', `NCS Matter Sample activated: ${activeSample.sample.name} [${activeSample.sample.sdkPath}]`);
       sessionTracker.recordAction(req.headers['x-session-id'], 'SAMPLE_SELECT', `NCS 샘플 전환: ${activeSample.sample.name} (${activeSample.sample.sdkPath})`);
       auditDb.recordLog({
-        userId: ctx.user ? ctx.user.id : 'anonymous',
-        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
-        userRole: ctx.user ? ctx.user.role : 'guest',
+        userId: ctx.user.id,
+        userName: ctx.user.name,
+        userRole: ctx.user.role,
         boardId: ctx.boardId,
         boardName: ctx.boardName,
         category: 'FIRMWARE_FLASH',
@@ -767,7 +803,8 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/samples/control - Interact with Active Sample Clusters
     if (pathname === '/api/samples/control' && method === 'POST') {
-      const ctx = getAuthContext(req);
+      const ctx = checkAuthRole(req, res, ['admin', 'engineer', 'qa']);
+      if (!ctx) return;
       const body = await parseJsonBody(req);
       const sampleId = body.sampleId || samplesCatalog.activeSampleId;
       const updatedState = samplesCatalog.updateSampleState(sampleId, body.patch || {});
@@ -790,9 +827,9 @@ const server = http.createServer(async (req, res) => {
       board.addLog('INF', 'matter', `Matter Sample [${sampleId}] cluster updated: ${JSON.stringify(body.patch || {})}`);
       sessionTracker.recordAction(req.headers['x-session-id'], 'CLUSTER_CONTROL', `Matter [${sampleId}] 클러스터 속성 변경: ${JSON.stringify(body.patch || {})}`);
       auditDb.recordLog({
-        userId: ctx.user ? ctx.user.id : 'anonymous',
-        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
-        userRole: ctx.user ? ctx.user.role : 'guest',
+        userId: ctx.user.id,
+        userName: ctx.user.name,
+        userRole: ctx.user.role,
         boardId: ctx.boardId,
         boardName: ctx.boardName,
         category: 'MATTER_CLUSTER',

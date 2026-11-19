@@ -3122,9 +3122,75 @@ input[type="range"]::-webkit-slider-thumb {
   color: #fff;
 }
 
-/* ============================================================ */
-/* ADMIN DASHBOARD & ADVANCED AUDIT LOG CENTER                  */
-/* ============================================================ */
+/* Guest Warning Banner */
+.guest-warning-banner {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.22), rgba(15, 23, 42, 0.95));
+  border-bottom: 1px solid rgba(245, 158, 11, 0.4);
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #fef08a;
+  font-size: 0.82rem;
+  animation: fadeInDown 0.3s ease;
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.guest-locked {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+  filter: grayscale(0.5);
+  position: relative;
+}
+
+.admin-lock-overlay {
+  background: rgba(11, 19, 34, 0.92);
+  border: 1px dashed rgba(239, 68, 68, 0.5);
+  border-radius: 12px;
+  padding: 40px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.auth-status-pill {
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.auth-status-guest {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.auth-status-admin {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.25);
+}
+
+.auth-status-engineer {
+  background: rgba(14, 165, 233, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(14, 165, 233, 0.5);
+}
+
 .admin-filter-bar {
   display: flex;
   flex-wrap: wrap;

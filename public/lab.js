@@ -1048,6 +1048,11 @@ function copyBuildCmd(cmd) {
 }
 
 async function selectSample(sampleId) {
+  if (typeof currentAuthUser !== 'undefined' && (!currentAuthUser || currentAuthUser.role === 'viewer')) {
+    showToast('🔒 제어 권한 없음: NCS 샘플 전환 및 플래시는 엔지니어 또는 관리자로 로그인해야 합니다.', '⚠️');
+    if (typeof openDeveloperModal === 'function') openDeveloperModal();
+    return;
+  }
   try {
     showToast(`⚡ NCS 샘플 [${sampleId}] 플래시 및 전환 중...`, '⚡');
     const res = await fetch('/api/samples/select', {
@@ -1091,6 +1096,11 @@ function updateActiveSampleCardsUi() {
 }
 
 async function controlSampleDevice(sampleId, patch) {
+  if (typeof currentAuthUser !== 'undefined' && (!currentAuthUser || currentAuthUser.role === 'viewer')) {
+    showToast('🔒 제어 권한 없음: Matter 클러스터 제어는 엔지니어 또는 관리자로 로그인해야 합니다.', '⚠️');
+    if (typeof openDeveloperModal === 'function') openDeveloperModal();
+    return;
+  }
   try {
     const res = await fetch('/api/samples/control', {
       method: 'POST',

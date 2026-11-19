@@ -643,6 +643,11 @@ function setThingyColor(hex) {
 
 // Instant Optimistic UI for Master All LEDs Control
 async function setAllLeds(turnOn) {
+  if (!currentAuthUser || currentAuthUser.role === 'viewer') {
+    showToast('🔒 제어 권한 없음: 하드웨어 제어는 엔지니어 또는 관리자로 로그인해야 합니다.', '⚠️');
+    openDeveloperModal();
+    return;
+  }
   const isTurnOn = Boolean(turnOn);
   console.log(`[UI Action] setAllLeds -> ${isTurnOn ? 'ON' : 'OFF'}`);
 
@@ -684,6 +689,11 @@ async function setAllLeds(turnOn) {
 
 // Instant Optimistic UI for Individual LED Toggle
 async function toggleLed(pin) {
+  if (!currentAuthUser || currentAuthUser.role === 'viewer') {
+    showToast('🔒 제어 권한 없음: 개별 GPIO 제어는 엔지니어 또는 관리자로 로그인해야 합니다.', '⚠️');
+    openDeveloperModal();
+    return;
+  }
   let isCurrentlyOn = false;
   if (currentBoardState && currentBoardState.leds && currentBoardState.leds[pin] !== undefined) {
     isCurrentlyOn = Boolean(currentBoardState.leds[pin]);
@@ -738,6 +748,11 @@ async function pressButton(button) {
 }
 
 async function handleReset(target) {
+  if (!currentAuthUser || currentAuthUser.role === 'viewer') {
+    showToast('🔒 제어 권한 없음: 보드 코어 리셋은 엔지니어 또는 관리자로 로그인해야 합니다.', '⚠️');
+    openDeveloperModal();
+    return;
+  }
   showToast(`🔄 ${target.toUpperCase()} 리셋을 수행합니다...`, '🔄');
   try {
     await fetch('/api/board/reset', {
@@ -846,6 +861,11 @@ async function rescanJLink() {
 }
 
 async function eraseFlashMemory(area) {
+  if (!currentAuthUser || currentAuthUser.role === 'viewer') {
+    showToast('🔒 제어 권한 없음: 플래시 소거는 엔지니어 또는 관리자로 로그인해야 합니다.', '⚠️');
+    openDeveloperModal();
+    return;
+  }
   const isHw = currentBoardState && currentBoardState.boardInfo && currentBoardState.boardInfo.mode === 'hardware';
   const isConnected = Boolean(currentBoardState && currentBoardState.boardInfo && currentBoardState.boardInfo.jlinkConnected);
 
@@ -876,6 +896,11 @@ async function eraseFlashMemory(area) {
 }
 
 async function flashSampleFirmware(sample) {
+  if (!currentAuthUser || currentAuthUser.role === 'viewer') {
+    showToast('🔒 제어 권한 없음: 펌웨어 플래시는 엔지니어 또는 관리자로 로그인해야 합니다.', '⚠️');
+    openDeveloperModal();
+    return;
+  }
   const isHw = currentBoardState && currentBoardState.boardInfo && currentBoardState.boardInfo.mode === 'hardware';
   const isConnected = Boolean(currentBoardState && currentBoardState.boardInfo && currentBoardState.boardInfo.jlinkConnected);
 
@@ -1130,7 +1155,7 @@ let adminSearchTimer = null;
 
 // Intercept window.fetch to automatically provide Authorization: Bearer <token>
 const _nativeFetch = window.fetch;
-window.fetch = function(url, options = {}) {
+window.fetch = async function(url, options = {}) {
   options = options || {};
   options.headers = options.headers || {};
   if (currentAuthToken) {
@@ -1144,7 +1169,14 @@ window.fetch = function(url, options = {}) {
       }
     }
   }
-  return _nativeFetch.call(this, url, options);
+  const response = await _nativeFetch.call(this, url, options);
+  if (response.status === 401 && !url.includes('/api/auth/')) {
+    showToast('🔒 권한 제한: 제어 기능을 사용하려면 엔지니어 또는 관리자로 로그인해주세요.', '⚠️');
+    openDeveloperModal();
+  } else if (response.status === 403) {
+    showToast('🚫 권한 부족: 해당 작업을 수행할 수 있는 권한이 없습니다.', '⚠️');
+  }
+  return response;
 };
 
 // -------------------------------------------------------------
@@ -1167,8 +1199,12 @@ async function initAuth() {
     }
   }
 
-  // Default auto-login as admin if no session is set
-  await quickLoginAs('admin', 'admin1234', null, false);
+  // Not logged in -> Guest Mode (Read-Only)
+  currentAuthUser = null;
+  currentAuthToken = null;
+  localStorage.removeItem('nm_auth_token');
+  document.cookie = 'nm_token=; path=/; max-age=0';
+  updateTopbarAuthUi(null);
 }
 
 function updateTopbarAuthUi(user) {
@@ -1177,30 +1213,80 @@ function updateTopbarAuthUi(user) {
   const chipRole = document.getElementById('topbarUserRole');
   const authText = document.getElementById('topbarAuthText');
   const authIcon = document.getElementById('topbarAuthIcon');
+  const authBtn = document.getElementById('topbarAuthActionBtn');
   const modalUserTxt = document.getElementById('modalCurrentLoggedInUser');
   const logoutBtn = document.getElementById('modalLogoutBtn');
+  const guestBanner = document.getElementById('guestWarningBanner');
 
   if (user) {
+    if (guestBanner) guestBanner.style.display = 'none';
+
     if (chipAvatar) chipAvatar.innerText = user.avatar || '👤';
     if (chipName) chipName.innerText = user.name || user.username;
     if (chipRole) {
-      const roleKr = user.role === 'admin' ? '최고관리자 (Admin)' :
-                     user.role === 'engineer' ? '수석엔지니어 (Engineer)' :
-                     user.role === 'qa' ? 'QA 리드 (Tester)' : '참관자 (Viewer)';
+      const roleKr = user.role === 'admin' ? '👑 최고관리자 (Admin)' :
+                     user.role === 'engineer' ? '👨‍💻 수석엔지니어 (Engineer)' :
+                     user.role === 'qa' ? '🧪 QA 리드 (Tester)' : '👀 참관자 (Viewer)';
       chipRole.innerText = roleKr;
+      chipRole.style.color = user.role === 'admin' ? '#f87171' : user.role === 'engineer' ? '#38bdf8' : '#c084fc';
     }
     if (authText) authText.innerText = '로그아웃';
-    if (authIcon) authIcon.innerText = '🔒';
+    if (authIcon) authIcon.innerText = '🔓';
+    if (authBtn) {
+      authBtn.classList.remove('btn-primary');
+      authBtn.classList.add('btn-secondary');
+    }
     if (modalUserTxt) modalUserTxt.innerHTML = `현재 로그인: <strong style="color: var(--nordic-cyan);">${escapeHtml(user.name)}</strong> (${user.role})`;
     if (logoutBtn) logoutBtn.style.display = 'inline-block';
   } else {
-    if (chipAvatar) chipAvatar.innerText = '👤';
-    if (chipName) chipName.innerText = '미등록 게스트';
-    if (chipRole) chipRole.innerText = '로그인 필요';
+    // Guest (Logged out) state
+    if (guestBanner) guestBanner.style.display = 'flex';
+
+    if (chipAvatar) chipAvatar.innerText = '👀';
+    if (chipName) chipName.innerText = '게스트 모드 (Guest)';
+    if (chipRole) {
+      chipRole.innerText = '🔒 읽기 전용 (Read-Only)';
+      chipRole.style.color = '#fbbf24';
+    }
     if (authText) authText.innerText = '로그인';
     if (authIcon) authIcon.innerText = '🔑';
-    if (modalUserTxt) modalUserTxt.innerText = '현재 로그인: 게스트 (미등록)';
+    if (authBtn) {
+      authBtn.classList.remove('btn-secondary');
+      authBtn.classList.add('btn-primary');
+    }
+    if (modalUserTxt) modalUserTxt.innerHTML = '현재 로그인: <strong style="color: #fbbf24;">게스트 (읽기 전용)</strong>';
     if (logoutBtn) logoutBtn.style.display = 'none';
+  }
+
+  // Update physical buttons permission lock
+  enforceUiPermissions(user);
+}
+
+// Visual & Functional Permission Enforcement
+function enforceUiPermissions(user) {
+  const isGuest = !user || user.role === 'viewer';
+  const isAdmin = user && user.role === 'admin';
+  const isPrivileged = user && (user.role === 'admin' || user.role === 'engineer' || user.role === 'qa');
+
+  // 1. Sidebar Master LED Control Buttons
+  document.querySelectorAll('.quick-led-btn').forEach(btn => {
+    btn.classList.toggle('guest-locked', isGuest);
+    btn.title = isGuest ? '🔒 로그인이 필요합니다 (엔지니어/관리자 전용)' : 'LED 제어';
+  });
+
+  // 2. Hardware Reset & Probe buttons
+  const resetBtn = document.querySelector('button[onclick*="handleReset"]');
+  if (resetBtn) {
+    resetBtn.classList.toggle('guest-locked', isGuest);
+    resetBtn.title = isGuest ? '🔒 로그인이 필요합니다 (엔지니어/관리자 전용)' : '보드 리셋';
+  }
+
+  // 3. Admin Purge Button
+  const purgeBtn = document.querySelector('button[onclick*="confirmPurgeLogs"]');
+  if (purgeBtn) {
+    purgeBtn.disabled = !isAdmin;
+    purgeBtn.classList.toggle('guest-locked', !isAdmin);
+    purgeBtn.title = isAdmin ? '감사 로그 초기화' : '🔒 최고 관리자(admin) 전용';
   }
 }
 
@@ -1567,6 +1653,8 @@ function renderAdminUsersTable(users = []) {
     return;
   }
 
+  const canManageUsers = currentAuthUser && currentAuthUser.role === 'admin';
+
   tbody.innerHTML = users.map(u => {
     const isBlocked = u.status === 'blocked';
     const isAdmin = u.username === 'admin';
@@ -1581,7 +1669,7 @@ function renderAdminUsersTable(users = []) {
           ${escapeHtml(u.name)}
         </td>
         <td>
-          <select class="admin-filter-select" style="font-size: 0.72rem; padding: 2px 6px;" onchange="updateUserRole('${escapeHtml(u.username)}', this.value)" ${isAdmin ? 'disabled' : ''}>
+          <select class="admin-filter-select" style="font-size: 0.72rem; padding: 2px 6px;" onchange="updateUserRole('${escapeHtml(u.username)}', this.value)" ${(!canManageUsers || isAdmin) ? 'disabled title="관리자(Admin)만 변경 가능"' : ''}>
             <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin (관리자)</option>
             <option value="engineer" ${u.role === 'engineer' ? 'selected' : ''}>Engineer (개발자)</option>
             <option value="qa" ${u.role === 'qa' ? 'selected' : ''}>QA (검증원)</option>
@@ -1600,11 +1688,11 @@ function renderAdminUsersTable(users = []) {
           ${lastLogin}
         </td>
         <td>
-          ${isAdmin ? '<span style="font-size: 0.7rem; color: #94a3b8;">최고관리자 (보호됨)</span>' : `
+          ${isAdmin ? '<span style="font-size: 0.7rem; color: #94a3b8;">최고관리자 (보호됨)</span>' : (!canManageUsers ? '<span style="font-size: 0.7rem; color: #64748b;">🔒 Admin 전용 기능</span>' : `
             <button class="action-btn ${isBlocked ? 'btn-primary' : 'btn-danger-soft'}" style="font-size: 0.68rem; padding: 3px 8px;" onclick="updateUserStatus('${escapeHtml(u.username)}', '${isBlocked ? 'active' : 'blocked'}')">
               ${isBlocked ? '✅ 계정 활성화' : '🚫 계정 차단'}
             </button>
-          `}
+          `)}
         </td>
       </tr>
     `;

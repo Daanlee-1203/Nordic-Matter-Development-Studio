@@ -295,6 +295,20 @@
         </div>
       </header>
 
+      <!-- Guest Read-Only Mode Warning Banner -->
+      <div id="guestWarningBanner" class="guest-warning-banner" style="display: none;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.3rem;">🔒</span>
+          <div>
+            <strong style="color: #fbbf24; font-size: 0.85rem;">게스트 모드 (Guest / Read-Only):</strong> 현재 로그인되어 있지 않아 <strong>읽기 전용 모드</strong>로 작동 중입니다. 하드웨어 제어, 펌웨어 플래시 및 관리 기능을 사용하려면 로그인하세요.
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; flex-shrink: 0;">
+          <button class="action-btn btn-primary" onclick="quickLoginAs('engineer', 'dev1234')">👨‍💻 엔지니어로 즉시 로그인</button>
+          <button class="action-btn btn-secondary" onclick="openDeveloperModal()">🔑 계정 로그인 창 열기</button>
+        </div>
+      </div>
+
       <!-- Content Body Area -->
       <main class="content-body">
 
