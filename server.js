@@ -11,6 +11,8 @@ const boardsCatalog = require('./engine/boards_catalog');
 const matter16 = require('./engine/matter16_engine');
 const samplesCatalog = require('./engine/samples_catalog');
 const sessionTracker = require('./engine/session_tracker');
+const authManager = require('./engine/auth_manager');
+const auditDb = require('./engine/audit_db');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -41,6 +43,7 @@ matter16.on('matter16Updated', (st) => broadcastSse('matter16', st));
 matter16.on('quickStartUpdated', (st) => broadcastSse('quickstart', st));
 sessionTracker.on('sessionsUpdated', (data) => broadcastSse('sessions', data));
 sessionTracker.on('newAuditLog', (log) => broadcastSse('access_log', log));
+auditDb.on('newLog', (log) => broadcastSse('audit_log', log));
 
 // Periodic Power Profiler sample broadcast (10Hz ~ 100ms)
 setInterval(() => {
@@ -65,6 +68,35 @@ function parseJsonBody(req) {
   });
 }
 
+// Helper to extract authenticated user & context
+function getAuthContext(req) {
+  let token = null;
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7).trim();
+  } else if (req.headers.cookie) {
+    const match = req.headers.cookie.match(/nm_token=([^;]+)/);
+    if (match) token = match[1];
+  }
+  const session = authManager.getSession(token);
+  const activeBoard = boardsCatalog.getActiveBoard() || { id: 'nrf5340dk', name: 'nRF5340 DK' };
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+  return {
+    token,
+    user: session ? {
+      id: session.userId,
+      username: session.username,
+      name: session.name,
+      role: session.role,
+      avatar: session.avatar,
+      email: session.email
+    } : null,
+    boardId: activeBoard.id,
+    boardName: activeBoard.name,
+    ip: typeof clientIp === 'string' ? clientIp.split(',')[0].trim() : '127.0.0.1'
+  };
+}
+
 // MIME types table
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -85,7 +117,7 @@ const server = http.createServer(async (req, res) => {
   // CORS & Cache headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-session-id');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -121,6 +153,7 @@ const server = http.createServer(async (req, res) => {
     res.write(`event: samples_catalog\ndata: ${JSON.stringify({ active: samplesCatalog.getActiveSample(), all: samplesCatalog.getAllSamples() })}\n\n`);
     res.write(`event: sessions\ndata: ${JSON.stringify(sessionTracker.getActiveSessionsSummary())}\n\n`);
     res.write(`event: access_logs\ndata: ${JSON.stringify(sessionTracker.getAuditLogs('all', 100))}\n\n`);
+    res.write(`event: audit_stats\ndata: ${JSON.stringify(auditDb.getStats())}\n\n`);
     res.write(`event: current_session\ndata: ${JSON.stringify(session)}\n\n`);
     res.write(`event: logs\ndata: ${JSON.stringify(board.getLogs())}\n\n`);
     res.write(`event: power_init\ndata: ${JSON.stringify({ summary: power.getSummary(), history: power.getHistory() })}\n\n`);
@@ -138,6 +171,180 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
+    // -----------------------------------------------------------
+    // AUTHENTICATION & USER SESSION API
+    // -----------------------------------------------------------
+    if (pathname === '/api/auth/login' && method === 'POST') {
+      const body = await parseJsonBody(req);
+      const ctx = getAuthContext(req);
+      const result = authManager.login(body.username, body.password, {
+        ip: ctx.ip,
+        userAgent: req.headers['user-agent']
+      });
+
+      if (result.success) {
+        auditDb.recordLog({
+          userId: result.user.id,
+          userName: result.user.name,
+          userRole: result.user.role,
+          boardId: ctx.boardId,
+          boardName: ctx.boardName,
+          category: 'AUTH',
+          action: 'LOGIN_SUCCESS',
+          details: `사용자 [${result.user.name}] 로그인 성공 (ID: ${result.user.username}, 권한: ${result.user.role})`,
+          status: 'SUCCESS',
+          ip: ctx.ip
+        });
+      } else {
+        auditDb.recordLog({
+          userId: body.username || 'unknown',
+          userName: body.username || '알 수 없음',
+          userRole: 'guest',
+          boardId: ctx.boardId,
+          boardName: ctx.boardName,
+          category: 'AUTH',
+          action: 'LOGIN_FAILED',
+          details: `로그인 실패 시도 (ID: ${body.username || '빈값'}): ${result.message}`,
+          status: 'WARNING',
+          ip: ctx.ip
+        });
+      }
+      return res.end(JSON.stringify(result));
+    }
+
+    if (pathname === '/api/auth/register' && method === 'POST') {
+      const body = await parseJsonBody(req);
+      const ctx = getAuthContext(req);
+      const result = authManager.register(body);
+
+      if (result.success) {
+        auditDb.recordLog({
+          userId: result.user.id,
+          userName: result.user.name,
+          userRole: result.user.role,
+          boardId: ctx.boardId,
+          boardName: ctx.boardName,
+          category: 'AUTH',
+          action: 'REGISTER_SUCCESS',
+          details: `신규 사용자 가입 완료: ${result.user.username} (${result.user.name})`,
+          status: 'SUCCESS',
+          ip: ctx.ip
+        });
+      }
+      return res.end(JSON.stringify(result));
+    }
+
+    if (pathname === '/api/auth/logout' && method === 'POST') {
+      const ctx = getAuthContext(req);
+      if (ctx.user) {
+        auditDb.recordLog({
+          userId: ctx.user.id,
+          userName: ctx.user.name,
+          userRole: ctx.user.role,
+          boardId: ctx.boardId,
+          boardName: ctx.boardName,
+          category: 'AUTH',
+          action: 'LOGOUT',
+          details: `사용자 [${ctx.user.name}] 안전 로그아웃`,
+          status: 'INFO',
+          ip: ctx.ip
+        });
+      }
+      authManager.logout(ctx.token);
+      return res.end(JSON.stringify({ success: true, message: '로그아웃되었습니다.' }));
+    }
+
+    if (pathname === '/api/auth/me' && method === 'GET') {
+      const ctx = getAuthContext(req);
+      return res.end(JSON.stringify({
+        authenticated: !!ctx.user,
+        user: ctx.user
+      }));
+    }
+
+    // -----------------------------------------------------------
+    // ADMIN DASHBOARD & AUDIT LOG API
+    // -----------------------------------------------------------
+    if (pathname === '/api/admin/logs' && method === 'GET') {
+      const q = parsedUrl.query;
+      const logsResult = auditDb.queryLogs({
+        userId: q.userId || 'all',
+        boardId: q.boardId || 'all',
+        category: q.category || 'all',
+        status: q.status || 'all',
+        search: q.search || '',
+        limit: parseInt(q.limit || 100),
+        offset: parseInt(q.offset || 0)
+      });
+      return res.end(JSON.stringify(logsResult));
+    }
+
+    if (pathname === '/api/admin/stats' && method === 'GET') {
+      return res.end(JSON.stringify(auditDb.getStats()));
+    }
+
+    if (pathname === '/api/admin/users' && method === 'GET') {
+      return res.end(JSON.stringify({ users: authManager.getAllUsers() }));
+    }
+
+    if (pathname === '/api/admin/users/status' && method === 'POST') {
+      const ctx = getAuthContext(req);
+      const body = await parseJsonBody(req);
+      const result = authManager.updateUserStatus(body.username, body.status);
+      if (result.success) {
+        auditDb.recordLog({
+          userId: ctx.user ? ctx.user.id : 'admin',
+          userName: ctx.user ? ctx.user.name : '시스템 관리자',
+          userRole: 'admin',
+          boardId: ctx.boardId,
+          boardName: ctx.boardName,
+          category: 'SECURITY_AUDIT',
+          action: 'USER_STATUS_CHANGE',
+          details: `사용자 [${body.username}] 상태 -> ${body.status}`,
+          status: 'WARNING',
+          ip: ctx.ip
+        });
+      }
+      return res.end(JSON.stringify(result));
+    }
+
+    if (pathname === '/api/admin/users/role' && method === 'POST') {
+      const ctx = getAuthContext(req);
+      const body = await parseJsonBody(req);
+      const result = authManager.updateUserRole(body.username, body.role);
+      if (result.success) {
+        auditDb.recordLog({
+          userId: ctx.user ? ctx.user.id : 'admin',
+          userName: ctx.user ? ctx.user.name : '시스템 관리자',
+          userRole: 'admin',
+          boardId: ctx.boardId,
+          boardName: ctx.boardName,
+          category: 'SECURITY_AUDIT',
+          action: 'USER_ROLE_CHANGE',
+          details: `사용자 [${body.username}] 권한 역할 -> ${body.role}`,
+          status: 'WARNING',
+          ip: ctx.ip
+        });
+      }
+      return res.end(JSON.stringify(result));
+    }
+
+    if (pathname === '/api/admin/logs/clear' && method === 'POST') {
+      const ctx = getAuthContext(req);
+      const result = auditDb.clearLogs(ctx.user);
+      return res.end(JSON.stringify(result));
+    }
+
+    if (pathname === '/api/admin/logs/export' && method === 'GET') {
+      const csv = auditDb.exportCsv(parsedUrl.query);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="nordic_matter_studio_audit_logs.csv"');
+      return res.end(csv);
+    }
+
+    // -----------------------------------------------------------
+    // HARDWARE BOARD CONTROL & SYSTEM API
+    // -----------------------------------------------------------
     // GET /api/status - Complete Board Status
     if (pathname === '/api/status' && method === 'GET') {
       return res.end(JSON.stringify({
@@ -155,53 +362,144 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/board/reset - Reset Board Cores
     if (pathname === '/api/board/reset' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const result = await board.resetBoard(body.target || 'all');
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'BOARD_CONTROL',
+        action: 'BOARD_RESET',
+        details: `보드 리셋 수행 (Core Target: ${body.target || 'all'})`,
+        status: 'INFO',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify(result));
     }
 
     // POST /api/board/gpio - Control Single LED
     if (pathname === '/api/board/gpio' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const result = await board.setGpio(body.pin, body.value);
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'BOARD_CONTROL',
+        action: 'GPIO_SET',
+        details: `${body.pin.toUpperCase()} 제어 -> ${body.value ? 'ON (HIGH)' : 'OFF (LOW)'}`,
+        status: 'SUCCESS',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify(result));
     }
 
     // POST /api/board/leds/all - Turn All LEDs ON or OFF
     if (pathname === '/api/board/leds/all' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const isTurnOn = body.turnOn === true || body.turnOn === 'true' || body.turnOn === 1;
       const result = await board.setAllLeds(isTurnOn);
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'BOARD_CONTROL',
+        action: 'LEDS_ALL',
+        details: `전체 LED ${isTurnOn ? '동시 점등 (ALL ON)' : '동시 소등 (ALL OFF)'}`,
+        status: 'SUCCESS',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify(result));
     }
 
     // POST /api/board/button - Press Buttons
     if (pathname === '/api/board/button' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const result = await board.pressButton(body.button);
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'BOARD_CONTROL',
+        action: 'BUTTON_PRESS',
+        details: `하드웨어 버튼 입력 감지: ${body.button.toUpperCase()} 클릭 이벤트`,
+        status: 'SUCCESS',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify(result));
     }
 
     // POST /api/board/flash/erase - Erase Flash Memory
     if (pathname === '/api/board/flash/erase' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const result = await board.eraseFlash(body.area || 'chip');
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'FIRMWARE_FLASH',
+        action: 'FLASH_ERASE',
+        details: `플래시 메모리 영역 소거 (Target: ${body.area || 'chip'})`,
+        status: result.success ? 'SUCCESS' : 'ERROR',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify(result));
     }
 
     // POST /api/board/flash/program - Flash Sample Firmware
     if (pathname === '/api/board/flash/program' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const result = await board.flashSample(body.sample || 'matter_light_bulb');
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'FIRMWARE_FLASH',
+        action: 'FLASH_PROGRAM',
+        details: `펌웨어 바이너리 프로그래밍 [${body.sample}]: ${result.message}`,
+        status: result.success ? 'SUCCESS' : 'ERROR',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify(result));
     }
 
     // POST /api/board/mode - Switch Hardware / Simulation Mode
     if (pathname === '/api/board/mode' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       board.boardInfo.mode = body.mode === 'hardware' ? 'hardware' : 'simulation';
       board.addLog('INF', 'system', `Operation mode switched to: ${board.boardInfo.mode.toUpperCase()}`);
       board.emit('boardUpdated', board.getBoardState());
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'SYSTEM',
+        action: 'MODE_SWITCH',
+        details: `운영 모드 전환 -> ${board.boardInfo.mode.toUpperCase()}`,
+        status: 'INFO',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify({ success: true, mode: board.boardInfo.mode }));
     }
 
@@ -213,8 +511,21 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/terminal/command - Execute CLI Command
     if (pathname === '/api/terminal/command' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const response = board.processCommand(body.command);
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'CLI_TOOL',
+        action: 'CLI_EXEC',
+        details: `터미널 명령 실행: ${body.command}`,
+        status: 'INFO',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify({ success: true, response }));
     }
 
@@ -225,22 +536,49 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/matter/control - Control Light (Power, Level, Color, Kelvin)
     if (pathname === '/api/matter/control' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const result = matter.updateControl(body);
       board.addLog('INF', 'matter', `Matter Command applied: On=${result.state.onOff}, Level=${result.state.level}, Temp=${result.state.colorTemperatureKelvin}K, RGB=${result.state.rgbHex}`);
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'MATTER_CLUSTER',
+        action: 'LIGHT_CONTROL',
+        details: `조명 제어: Power=${result.state.onOff}, Level=${result.state.level}%, RGB=${result.state.rgbHex}`,
+        status: 'SUCCESS',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify(result));
     }
 
     // POST /api/matter/scene - Activate Preset Scene
     if (pathname === '/api/matter/scene' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const result = matter.applyScene(body.sceneId);
       board.addLog('INF', 'matter', `Matter Scene triggered: ${result.scene || body.sceneId}`);
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'MATTER_CLUSTER',
+        action: 'SCENE_APPLY',
+        details: `씬(Scene) 모드 활성화: ${result.scene || body.sceneId}`,
+        status: 'SUCCESS',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify(result));
     }
 
-    // POST /api/matter/event - Trigger Webhook / Event Alert (PRD F-07)
+    // POST /api/matter/event - Trigger Webhook / Event Alert
     if (pathname === '/api/matter/event' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const eventPayload = {
         eventId: body.eventId || `evt-${Date.now()}`,
@@ -252,6 +590,18 @@ const server = http.createServer(async (req, res) => {
         blinkCount: body.blinkCount || 3
       };
       const result = await matter.triggerAlert(eventPayload);
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'MATTER_CLUSTER',
+        action: 'ALERT_TRIGGER',
+        details: `이벤트 웹훅 알림 발동: [${eventPayload.label}] (${eventPayload.eventType})`,
+        status: 'SUCCESS',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify(result));
     }
 
@@ -281,10 +631,23 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/boards/select - Select Active Development Board
     if (pathname === '/api/boards/select' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const activeBoard = boardsCatalog.setActiveBoard(body.boardId);
       board.syncActiveBoard(body.boardId);
       sessionTracker.recordAction(req.headers['x-session-id'], 'BOARD_SELECT', `개발보드 전환: ${activeBoard.name} (${activeBoard.code})`);
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: activeBoard.id,
+        boardName: activeBoard.name,
+        category: 'BOARD_CONTROL',
+        action: 'BOARD_SELECT',
+        details: `타겟 개발보드 전환: ${activeBoard.name} [${activeBoard.code}]`,
+        status: 'INFO',
+        ip: ctx.ip
+      });
       broadcastSse('boards', { active: activeBoard, all: boardsCatalog.getAllBoards() });
       broadcastSse('board', board.getBoardState());
       return res.end(JSON.stringify({ success: true, active: activeBoard }));
@@ -298,55 +661,55 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({
         toolchain: matter16.verifyEnvironment(),
         quickstart: matter16.quickStartState,
-        matter16: matter16.matter16State,
-        commissioning: matter16.commissioningData
+        features: matter16.matter16State.features,
+        deviceTypes: matter16.matter16State.deviceTypes,
+        productSecurity: matter16.matter16State.productSecurity
       }));
     }
 
-    // POST /api/matter16/quickstart - Advance Quick Start Step
-    if (pathname === '/api/matter16/quickstart' && method === 'POST') {
+    // POST /api/matter16/quickstart/step - Execute QuickStart Step
+    if (pathname === '/api/matter16/quickstart/step' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
-      const result = matter16.advanceQuickStartStep(body.step, body);
-      board.addLog('INF', 'quickstart', `Quick Start Step ${result.currentStep} executed: Sample=${result.selectedSample}`);
+      const stepIndex = parseInt(body.stepIndex, 10);
+      const result = await matter16.executeQuickStartStep(stepIndex);
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'SYSTEM',
+        action: 'QUICKSTART_STEP',
+        details: `Matter 1.6 퀵스타트 Step ${stepIndex} 실행: ${result.name}`,
+        status: 'SUCCESS',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify(result));
     }
 
-    // POST /api/matter16/factory-data - Generate Factory Data & QR
-    if (pathname === '/api/matter16/factory-data' && method === 'POST') {
-      const body = await parseJsonBody(req);
-      const result = matter16.generateFactoryData(body);
-      board.addLog('INF', 'factory', `Factory Data & QR generated: Manual Code=${result.manualCode}`);
+    // POST /api/matter16/quickstart/reset - Reset QuickStart Pipeline
+    if (pathname === '/api/matter16/quickstart/reset' && method === 'POST') {
+      const ctx = getAuthContext(req);
+      const result = matter16.resetQuickStart();
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'SYSTEM',
+        action: 'QUICKSTART_RESET',
+        details: 'Matter 1.6 퀵스타트 파이프라인 초기화',
+        status: 'INFO',
+        ip: ctx.ip
+      });
       return res.end(JSON.stringify(result));
     }
 
-    // POST /api/matter16/nfc-tap - Simulate 13.56MHz NFC-Only Commissioning
-    if (pathname === '/api/matter16/nfc-tap' && method === 'POST') {
-      const body = await parseJsonBody(req);
-      const result = matter16.triggerNfcTap(body.devicePowered !== false);
-      board.addLog('INF', 'nfc', `Matter 1.6 Bidirectional NFC Commissioning triggered: Powered=${body.devicePowered !== false}`);
-      return res.end(JSON.stringify(result));
-    }
-
-    // POST /api/matter16/joint-fabric/controller - Add Controller to Shared Datastore
-    if (pathname === '/api/matter16/joint-fabric/controller' && method === 'POST') {
-      const body = await parseJsonBody(req);
-      const result = matter16.addJointFabricController(body.name || 'New Ecosystem Controller', body.role || 'Operator');
-      board.addLog('INF', 'joint-fabric', `Joint Fabric Controller added: ${body.name}, Total=${result.totalControllers}, FabricIndex=1`);
-      return res.end(JSON.stringify(result));
-    }
-
-    // POST /api/matter16/thermostat/suggest - Send Context-Driven Thermostat Suggestion
-    if (pathname === '/api/matter16/thermostat/suggest' && method === 'POST') {
-      const body = await parseJsonBody(req);
-      const result = matter16.sendThermostatSuggestion(body);
-      board.addLog('INF', 'thermostat', `Thermostat Suggestion received: ${result.suggestedTempC}C (${result.decision})`);
-      return res.end(JSON.stringify(result));
-    }
-
-    // POST /api/matter16/crl/update - Simulate Product Security 1.1 CRL Chunk Update
+    // POST /api/matter16/crl/update - Trigger CRL (Revocation List) chunk update
     if (pathname === '/api/matter16/crl/update' && method === 'POST') {
-      const body = await parseJsonBody(req);
-      const result = matter16.simulateCrlChunkUpdate(body.chunkIndex);
+      const result = matter16.updateCrlChunk();
       board.addLog('INF', 'security', `Product Security 1.1 CRL Chunk ${result.chunkIndex} updated`);
       return res.end(JSON.stringify(result));
     }
@@ -376,6 +739,7 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/samples/select - Select & Activate Sample Firmware
     if (pathname === '/api/samples/select' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const activeSample = samplesCatalog.setActiveSample(body.sampleId);
       if (board.appCore) {
@@ -384,6 +748,18 @@ const server = http.createServer(async (req, res) => {
       board.recordLineage('NCS Sample Switch', 'Catalog Selector', 'Application Core', 'Firmware: ' + activeSample.sample.id, 'Loaded ' + activeSample.sample.sdkPath, 'SUCCESS');
       board.addLog('INF', 'samples', `NCS Matter Sample activated: ${activeSample.sample.name} [${activeSample.sample.sdkPath}]`);
       sessionTracker.recordAction(req.headers['x-session-id'], 'SAMPLE_SELECT', `NCS 샘플 전환: ${activeSample.sample.name} (${activeSample.sample.sdkPath})`);
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'FIRMWARE_FLASH',
+        action: 'SAMPLE_SELECT',
+        details: `NCS 예제 전환: ${activeSample.sample.name} (${activeSample.sample.sdkPath})`,
+        status: 'SUCCESS',
+        ip: ctx.ip
+      });
       broadcastSse('samples', activeSample);
       broadcastSse('board', board.getBoardState());
       return res.end(JSON.stringify({ success: true, active: activeSample }));
@@ -391,6 +767,7 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/samples/control - Interact with Active Sample Clusters
     if (pathname === '/api/samples/control' && method === 'POST') {
+      const ctx = getAuthContext(req);
       const body = await parseJsonBody(req);
       const sampleId = body.sampleId || samplesCatalog.activeSampleId;
       const updatedState = samplesCatalog.updateSampleState(sampleId, body.patch || {});
@@ -412,12 +789,24 @@ const server = http.createServer(async (req, res) => {
       board.recordLineage('Matter Cluster Cmd', 'Studio Web Controller', `Endpoint ${samplesCatalog.getSample(sampleId).endpoint} (${sampleId})`, JSON.stringify(body.patch || {}), 'Cluster Attributes Updated', 'SUCCESS');
       board.addLog('INF', 'matter', `Matter Sample [${sampleId}] cluster updated: ${JSON.stringify(body.patch || {})}`);
       sessionTracker.recordAction(req.headers['x-session-id'], 'CLUSTER_CONTROL', `Matter [${sampleId}] 클러스터 속성 변경: ${JSON.stringify(body.patch || {})}`);
+      auditDb.recordLog({
+        userId: ctx.user ? ctx.user.id : 'anonymous',
+        userName: ctx.user ? ctx.user.name : '미등록 엔지니어',
+        userRole: ctx.user ? ctx.user.role : 'guest',
+        boardId: ctx.boardId,
+        boardName: ctx.boardName,
+        category: 'MATTER_CLUSTER',
+        action: 'CLUSTER_CONTROL',
+        details: `Matter [${sampleId}] 클러스터 속성 변경: ${JSON.stringify(body.patch || {})}`,
+        status: 'SUCCESS',
+        ip: ctx.ip
+      });
       broadcastSse('samples', samplesCatalog.getActiveSample());
       return res.end(JSON.stringify({ success: true, sampleId, liveState: updatedState }));
     }
 
     // -----------------------------------------------------------
-    // USER SESSIONS & ACCESS AUDIT LOG API
+    // USER SESSIONS & ACCESS AUDIT LOG API (LEGACY COMPATIBILITY)
     // -----------------------------------------------------------
     // GET /api/sessions - Active Connected Developers & Sessions Summary
     if (pathname === '/api/sessions' && method === 'GET') {
@@ -482,10 +871,14 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log('================================================================');
-  console.log(`  nRF5340 DK Studio & Matter Controller App Running!`);
-  console.log(`  URL: http://localhost:${PORT}`);
-  console.log(`  J-Link Detected: ${jlink.hasJLink ? 'YES (/usr/local/bin/JLinkExe)' : 'NO (Virtual Emulation)'}`);
-  console.log('================================================================');
-});
+if (require.main === module) {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log('================================================================');
+    console.log(`  Nordic Matter Development Studio & Admin Center Running!`);
+    console.log(`  Local URL: http://localhost:${PORT}`);
+    console.log(`  J-Link Probe: ${jlink.hasJLink ? 'Active (/usr/local/bin/JLinkExe)' : 'Virtual Emulation Mode'}`);
+    console.log('================================================================');
+  });
+}
+
+module.exports = server;

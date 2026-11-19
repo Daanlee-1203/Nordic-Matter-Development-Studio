@@ -122,7 +122,8 @@ body {
 /* LEFT SIDEBAR NAVIGATION (USER-CENTERED WORKBENCH)            */
 /* ============================================================ */
 .sidebar {
-  width: 325px;
+  width: 345px;
+  min-width: 345px;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   display: flex;
@@ -3120,3 +3121,169 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow: 0 0 10px rgba(0, 169, 206, 0.25);
   color: #fff;
 }
+
+/* ============================================================ */
+/* ADMIN DASHBOARD & ADVANCED AUDIT LOG CENTER                  */
+/* ============================================================ */
+.admin-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  background: rgba(14, 23, 40, 0.85);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-top: 10px;
+  margin-bottom: 12px;
+}
+
+.admin-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-filter-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.admin-filter-select {
+  background: #0b1322;
+  border: 1px solid var(--border);
+  color: #e2e8f0;
+  font-size: 0.76rem;
+  padding: 5px 8px;
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+  min-width: 120px;
+  transition: border-color 0.18s ease;
+}
+
+.admin-filter-select:focus {
+  border-color: var(--nordic-cyan);
+}
+
+.admin-filter-search {
+  flex: 1;
+  min-width: 180px;
+  background: #0b1322;
+  border: 1px solid var(--border);
+  color: #fff;
+  font-size: 0.76rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.18s ease;
+}
+
+.admin-filter-search:focus {
+  border-color: var(--nordic-cyan);
+}
+
+.admin-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.badge-status {
+  display: inline-block;
+  padding: 2px 7px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.badge-status-success {
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.badge-status-info {
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.badge-status-warning {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.badge-status-error {
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.admin-role-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.role-admin {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.role-engineer {
+  background: rgba(14, 165, 233, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(14, 165, 233, 0.4);
+}
+
+.role-qa {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
+.role-viewer {
+  background: rgba(148, 163, 184, 0.2);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+.auth-modal-tabs {
+  display: flex;
+  border-bottom: 1px solid #1e293b;
+  margin-bottom: 12px;
+  gap: 4px;
+}
+
+.auth-modal-tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.auth-modal-tab-btn:hover {
+  color: #fff;
+}
+
+.auth-modal-tab-btn.active {
+  color: var(--nordic-cyan);
+  border-bottom-color: var(--nordic-cyan);
+}
+

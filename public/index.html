@@ -201,12 +201,12 @@
         </button>
 
         <button class="nav-item" id="btnNavAccessLogs" onclick="switchNav('accessLogsTab', this)">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/></svg>
           <div class="nav-label-box">
-            <span class="nav-title">사용자 접속 & 감사 로그</span>
-            <span class="nav-sub">Active Sessions & Audit Trail</span>
+            <span class="nav-title">관리자 대시보드 & 로그</span>
+            <span class="nav-sub">사용자·보드·유형별 종합 감사</span>
           </div>
-          <span class="nav-badge nav-badge-green" id="navActiveSessionsBadge">1명 온라인</span>
+          <span class="nav-badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">ADMIN</span>
         </button>
 
       </nav>
@@ -267,14 +267,18 @@
 
         <div class="topbar-actions">
           <!-- Developer Profile Chip & Quick Switcher -->
-          <div class="developer-profile-chip" onclick="openDeveloperModal()" id="topbarDevChip" title="클릭하여 개발자 계정/프로필 전환">
-            <span class="user-avatar-circle" id="topbarAvatar">👨‍💻</span>
+          <div class="developer-profile-chip" onclick="openDeveloperModal()" id="topbarDevChip" title="클릭하여 사용자 로그인 및 계정/권한 전환">
+            <span class="user-avatar-circle" id="topbarAvatar">👑</span>
             <div class="user-info-text">
-              <span class="user-name" id="topbarUserName">임베디드 수석 엔지니어</span>
-              <span class="user-role" id="topbarUserRole">Firmware Architect</span>
+              <span class="user-name" id="topbarUserName">시스템 최고 관리자</span>
+              <span class="user-role" id="topbarUserRole">Admin (통합 관제)</span>
             </div>
             <span class="online-indicator-dot" title="실시간 온라인"></span>
           </div>
+
+          <button class="action-btn btn-secondary" id="topbarAuthActionBtn" onclick="handleAuthButtonClick()" style="font-size: 0.72rem; padding: 5px 9px;">
+            <span id="topbarAuthIcon">🔓</span> <span id="topbarAuthText">계정/로그인</span>
+          </button>
 
           <button class="action-btn btn-secondary" onclick="printStudioReport()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
@@ -1578,39 +1582,168 @@ build/
         </div>
 
         <!-- ============================================================ -->
-        <!-- TAB 14: ACCESS LOGS & DEVELOPER SESSIONS (접속 현황 & 감사)  -->
+        <!-- TAB 14: ADMIN DASHBOARD & ADVANCED AUDIT LOG CENTER          -->
         <!-- ============================================================ -->
         <div id="accessLogsTab" class="tab-pane">
           <div class="panel">
             <div class="panel-header">
               <div>
-                <h2 class="panel-title">실시간 사용자 접속 현황 및 보안 감사 추적 로그 (Developer Sessions & Audit Trail)</h2>
+                <h2 class="panel-title">관리자 대시보드 & 종합 감사 로그 센터 (Admin Dashboard & Multi-Dimensional Audit Center)</h2>
                 <div style="font-size: 0.78rem; color: var(--text-muted);">
-                  현재 접속 중인 개발자 세션(IP, User-Agent, 활성 시간) 및 보드 조작, 펌웨어 플래시, 클러스터 명령 감사 이력을 실시간 모니터링합니다.
+                  사용자별, 개발보드별, 작업 유형별 실시간 활동 감사 이력을 다차원 필터링 및 통계로 분석하고 사용자 권한을 관리합니다.
                 </div>
               </div>
-              <div style="display: flex; gap: 8px; align-items: center;">
-                <button class="action-btn btn-secondary" onclick="exportAuditLogsCsv()">📥 CSV 감사 로그 다운로드</button>
-                <button class="action-btn btn-primary" onclick="openDeveloperModal()">👤 내 개발자 프로필 설정</button>
+              <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <button class="action-btn btn-secondary" onclick="exportAdminLogsCsv()">📥 CSV 감사 로그 다운로드</button>
+                <button class="action-btn btn-secondary" onclick="refreshAdminLogs()">🔄 실시간 새로고침</button>
+                <button class="action-btn btn-danger-soft" onclick="confirmPurgeLogs()">🗑️ 감사 로그 초기화</button>
+                <button class="action-btn btn-primary" onclick="openDeveloperModal()">👤 계정 전환 / 로그인</button>
               </div>
             </div>
 
-            <!-- 3 Summary KPI Cards -->
-            <div class="grid-3" style="margin-top: 10px;">
+            <!-- 4 Enhanced KPI Analytics Cards -->
+            <div class="grid-4" style="margin-top: 10px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
               <div class="card-inner">
-                <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">실시간 활성 세션 (Active Online)</div>
-                <div style="font-size: 1.6rem; font-weight: 800; color: #22c55e; margin-top: 4px;" id="kpiActiveSessionsCount">1 세션</div>
-                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">웹소켓 / SSE 실시간 연결 유지 중</div>
+                <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">누적 감사 로그 (Total Logs)</div>
+                <div style="font-size: 1.6rem; font-weight: 800; color: #38bdf8; margin-top: 4px;" id="kpiTotalAuditLogs">0 건</div>
+                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;" id="kpiTodayLogsText">최근 24시간: 0건</div>
               </div>
               <div class="card-inner">
-                <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">팀 협업 프로필 (Identified Roles)</div>
-                <div style="font-size: 1.6rem; font-weight: 800; color: var(--nordic-cyan); margin-top: 4px;" id="kpiIdentifiedDevs">4개 프리셋 역할</div>
-                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">개발자, QA, 보안감사관, 게스트</div>
+                <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">활성 개발자 (Active Users)</div>
+                <div style="font-size: 1.6rem; font-weight: 800; color: #22c55e; margin-top: 4px;" id="kpiActiveUsersCount">1 명</div>
+                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">인증 세션 유지 중</div>
               </div>
               <div class="card-inner">
-                <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">누적 감사 이벤트 (Audited Actions)</div>
-                <div style="font-size: 1.6rem; font-weight: 800; color: #f59e0b; margin-top: 4px;" id="kpiTotalAuditLogs">0 건</div>
-                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">보드 변경, 플래시, 클러스터 조작 기록</div>
+                <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">최다 타겟 보드 (Top Target)</div>
+                <div style="font-size: 1.4rem; font-weight: 800; color: #f59e0b; margin-top: 4px;" id="kpiTopBoard">nRF5340 DK</div>
+                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;" id="kpiTopBoardRatio">비중 75% 점유</div>
+              </div>
+              <div class="card-inner">
+                <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">보안 건전성 지수 (Audit Score)</div>
+                <div style="font-size: 1.6rem; font-weight: 800; color: #a855f7; margin-top: 4px;" id="kpiSecurityScore">100 점</div>
+                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">무결성 및 인증 상태 정상</div>
+              </div>
+            </div>
+
+            <!-- Multi-Dimensional Filter Toolbar -->
+            <div class="admin-filter-bar">
+              <!-- Filter: User -->
+              <div class="admin-filter-group">
+                <span class="admin-filter-label">👤 사용자:</span>
+                <select id="adminFilterUser" class="admin-filter-select" onchange="refreshAdminLogs()">
+                  <option value="all">전체 사용자 (All)</option>
+                  <option value="admin">👑 최고관리자 (admin)</option>
+                  <option value="engineer">👨‍💻 수석엔지니어 (engineer)</option>
+                  <option value="qa">🧪 QA 리드 (qa)</option>
+                  <option value="guest">👀 게스트 (guest)</option>
+                </select>
+              </div>
+
+              <!-- Filter: Board -->
+              <div class="admin-filter-group">
+                <span class="admin-filter-label">📟 개발보드:</span>
+                <select id="adminFilterBoard" class="admin-filter-select" onchange="refreshAdminLogs()">
+                  <option value="all">전체 개발보드 (All)</option>
+                  <option value="nrf5340dk">nRF5340 DK (Matter Dual-Core)</option>
+                  <option value="nrf54lm20dk">nRF54LM20 DK (Ultra-Low Power)</option>
+                  <option value="nrf54l15dk">nRF54L15 DK (Next-Gen IoT)</option>
+                  <option value="nrf52840dk">nRF52840 DK (Thread Standard)</option>
+                  <option value="nrf7002dk">nRF7002 DK (Wi-Fi 6 Companion)</option>
+                  <option value="thingy53">Nordic Thingy:53 (Multi-Sensor)</option>
+                  <option value="system">시스템 공통 (System)</option>
+                </select>
+              </div>
+
+              <!-- Filter: Category -->
+              <div class="admin-filter-group">
+                <span class="admin-filter-label">🏷️ 작업유형:</span>
+                <select id="adminFilterCategory" class="admin-filter-select" onchange="refreshAdminLogs()">
+                  <option value="all">전체 유형 (All)</option>
+                  <option value="AUTH">🔑 인증 / 로그인 (AUTH)</option>
+                  <option value="BOARD_CONTROL">⚙️ 보드 & GPIO 제어 (BOARD_CONTROL)</option>
+                  <option value="FIRMWARE_FLASH">⚡ 펌웨어 플래시 (FIRMWARE_FLASH)</option>
+                  <option value="MATTER_CLUSTER">💡 Matter 클러스터 (MATTER_CLUSTER)</option>
+                  <option value="SECURITY_AUDIT">🛡️ 보안 감사 (SECURITY_AUDIT)</option>
+                  <option value="CLI_TOOL">💻 CLI 터미널 (CLI_TOOL)</option>
+                  <option value="SYSTEM">🌐 시스템 (SYSTEM)</option>
+                </select>
+              </div>
+
+              <!-- Filter: Status -->
+              <div class="admin-filter-group">
+                <span class="admin-filter-label">🚦 상태:</span>
+                <select id="adminFilterStatus" class="admin-filter-select" onchange="refreshAdminLogs()">
+                  <option value="all">전체 상태 (All)</option>
+                  <option value="SUCCESS">✅ 성공 (SUCCESS)</option>
+                  <option value="INFO">ℹ️ 정보 (INFO)</option>
+                  <option value="WARNING">⚠️ 경고 (WARNING)</option>
+                  <option value="ERROR">❌ 오류 (ERROR)</option>
+                </select>
+              </div>
+
+              <!-- Filter: Search -->
+              <input type="text" id="adminFilterSearch" class="admin-filter-search" placeholder="액션명, 세부 작업내용, IP 검색..." oninput="debounceAdminSearch()">
+            </div>
+
+            <!-- Comprehensive Audit Logs Table -->
+            <div class="panel-modern" style="margin-top: 6px;">
+              <div class="panel-modern-header">
+                <div>
+                  <h3 class="panel-heading">다차원 실시간 감사 추적 기록 (Audit Trail Table)</h3>
+                  <div class="panel-subheading" id="adminLogsCountInfo">총 0건의 로그가 필터링되었습니다.</div>
+                </div>
+                <span class="status-badge status-running" id="adminAuditStatusBadge">실시간 동기화 중 (SSE Live)</span>
+              </div>
+
+              <div style="overflow-x: auto; max-height: 480px;">
+                <table class="modern-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 130px;">일시 (Time)</th>
+                      <th style="width: 140px;">사용자 계정</th>
+                      <th style="width: 90px;">권한</th>
+                      <th style="width: 130px;">타겟 개발보드</th>
+                      <th style="width: 110px;">작업 유형</th>
+                      <th style="width: 130px;">액션 (Action)</th>
+                      <th>세부 작업 내역 (Details)</th>
+                      <th style="width: 75px;">상태</th>
+                      <th style="width: 100px;">접속 IP</th>
+                    </tr>
+                  </thead>
+                  <tbody id="auditLogsTableBody">
+                    <!-- Populated via renderAdminLogsTable() -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Admin User Management Panel -->
+            <div class="panel-modern" style="margin-top: 14px;">
+              <div class="panel-modern-header">
+                <div>
+                  <h3 class="panel-heading">팀 사용자 계정 및 권한 관리 (Team Accounts Management)</h3>
+                  <div class="panel-subheading">등록된 사용자 계정의 활성화/차단 상태를 제어하고 권한 역할을 조정합니다.</div>
+                </div>
+                <button class="action-btn btn-secondary" onclick="refreshAdminUsers()">🔄 계정 목록 갱신</button>
+              </div>
+
+              <div style="overflow-x: auto;">
+                <table class="modern-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 120px;">아이디 (Username)</th>
+                      <th style="width: 150px;">사용자 이름</th>
+                      <th style="width: 120px;">현재 권한</th>
+                      <th style="width: 180px;">이메일</th>
+                      <th style="width: 90px;">계정 상태</th>
+                      <th style="width: 140px;">최근 로그인</th>
+                      <th style="width: 180px;">관리 액션 (Status & Role)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="adminUsersTableBody">
+                    <!-- Populated via renderAdminUsersTable() -->
+                  </tbody>
+                </table>
               </div>
             </div>
 
@@ -1618,55 +1751,13 @@ build/
             <div class="panel-modern" style="margin-top: 14px;">
               <div class="panel-modern-header">
                 <div>
-                  <h3 class="panel-heading">현재 실시간 접속 중인 개발자 세션 목록 (Active Connected Sessions)</h3>
-                  <div class="panel-subheading">로그인 허들 없이 IP/브라우저가 자동 식별되며, 프로필 변경 시 실명 감사 로그가 기록됩니다.</div>
+                  <h3 class="panel-heading">현재 실시간 접속 중인 세션 목록 (Active Connected Sessions)</h3>
+                  <div class="panel-subheading">IP/브라우저 세션 연결 상태 및 마지막 활동 시간</div>
                 </div>
-                <span class="status-badge status-running" id="sessionsStatusBadge">실시간 동기화 중 (SSE Live)</span>
+                <span class="status-badge status-running" id="sessionsStatusBadge">실시간 감지 중</span>
               </div>
               <div class="active-sessions-grid" id="activeSessionsGrid">
                 <!-- Dynamically populated via renderActiveSessions() -->
-              </div>
-            </div>
-
-            <!-- Comprehensive Access & Audit Log Table -->
-            <div class="panel-modern" style="margin-top: 14px;">
-              <div class="panel-modern-header">
-                <div>
-                  <h3 class="panel-heading">시스템 접근 및 명령 실행 감사 기록 (Audit Trail Table)</h3>
-                  <div class="panel-subheading">누가(Who), 언제(When), 어디서(IP/Device), 어떤 명령(What)을 수행했는지 시간순 추적</div>
-                </div>
-                <div style="display: flex; gap: 8px; align-items: center;">
-                  <input type="text" id="auditLogSearchInput" placeholder="사용자명, IP, 작업 검색..." style="background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; color: #fff; font-size: 0.75rem;" oninput="filterAuditLogsTable(this.value)">
-                </div>
-              </div>
-
-              <!-- Filter Pills -->
-              <div class="samples-filter-bar" style="margin-top: 8px; margin-bottom: 10px;">
-                <button class="sample-filter-btn active" onclick="filterAuditLogsCategory('all', this)">전체 이벤트 (All)</button>
-                <button class="sample-filter-btn" onclick="filterAuditLogsCategory('CONNECT', this)">🔌 세션 접속/종료</button>
-                <button class="sample-filter-btn" onclick="filterAuditLogsCategory('BOARD', this)">🛠️ 보드 전환</button>
-                <button class="sample-filter-btn" onclick="filterAuditLogsCategory('SAMPLE', this)">📦 샘플 로드</button>
-                <button class="sample-filter-btn" onclick="filterAuditLogsCategory('CLUSTER', this)">💡 클러스터 제어</button>
-              </div>
-
-              <div style="overflow-x: auto;">
-                <table class="modern-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 120px;">일시 (Time)</th>
-                      <th style="width: 130px;">개발자 (User)</th>
-                      <th style="width: 130px;">직책 (Role)</th>
-                      <th style="width: 95px;">클라이언트 IP</th>
-                      <th style="width: 130px;">클라이언트 환경</th>
-                      <th style="width: 120px;">이벤트 (Event)</th>
-                      <th>세부 작업 내용 (Details)</th>
-                      <th style="width: 75px;">상태</th>
-                    </tr>
-                  </thead>
-                  <tbody id="auditLogsTableBody">
-                    <!-- Populated via renderAuditLogs() -->
-                  </tbody>
-                </table>
               </div>
             </div>
 
@@ -1678,78 +1769,123 @@ build/
     </div>
   </div>
 
-  <!-- Developer Profile & Account Modal -->
+  <!-- User Authentication & Session Login Modal -->
   <div class="dev-modal-backdrop" id="devProfileModal">
     <div class="dev-modal-card">
       <div class="dev-modal-header">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="font-size: 1.4rem;">👤</span>
+          <span style="font-size: 1.4rem;">🔐</span>
           <div>
-            <h3 style="font-size: 1rem; font-weight: 800; color: #fff; margin: 0;">개발자 프로필 & 세션 계정 설정</h3>
+            <h3 style="font-size: 1rem; font-weight: 800; color: #fff; margin: 0;">사용자 인증 & 계정 관리 센터</h3>
             <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">
-              팀 협업 시 감사 로그에 본인의 이름과 역할을 기록하기 위해 프로필을 설정합니다.
+              보안 감사 기록 및 보드 제어 권한을 위해 계정으로 로그인합니다.
             </div>
           </div>
         </div>
         <button class="link-btn" onclick="closeDeveloperModal()" style="font-size: 1.1rem; color: #94a3b8;">✕</button>
       </div>
 
-      <div>
+      <!-- Modal Tabs: 1-Click Presets / Custom Login / Register -->
+      <div class="auth-modal-tabs">
+        <button class="auth-modal-tab-btn active" id="authTabPresetBtn" onclick="switchAuthModalTab('preset')">⚡ 원클릭 계정 전환</button>
+        <button class="auth-modal-tab-btn" id="authTabLoginBtn" onclick="switchAuthModalTab('login')">🔑 정식 로그인</button>
+        <button class="auth-modal-tab-btn" id="authTabRegisterBtn" onclick="switchAuthModalTab('register')">📝 신규 회원가입</button>
+      </div>
+
+      <!-- Tab Content 1: 1-Click Presets -->
+      <div id="authPresetContent">
         <label style="font-size: 0.76rem; font-weight: 700; color: #cbd5e1; display: block; margin-bottom: 6px;">
-          1. 추천 프리셋 역할 선택 (빠른 전환)
+          팀 표준 계정으로 즉시 전환 (원클릭 로그인):
         </label>
         <div class="dev-preset-grid">
-          <div class="dev-preset-btn active" onclick="applyPresetProfile('lead_dev', this)">
-            <span style="font-size: 1.2rem;">👨‍💻</span>
+          <div class="dev-preset-btn active" id="presetBtnAdmin" onclick="quickLoginAs('admin', 'admin1234', this)">
+            <span style="font-size: 1.3rem;">👑</span>
+            <div>
+              <div style="font-weight: 700; font-size: 0.78rem;">시스템 최고 관리자</div>
+              <div style="font-size: 0.65rem; color: #f87171;">ID: admin (전체 권한)</div>
+            </div>
+          </div>
+          <div class="dev-preset-btn" id="presetBtnEngineer" onclick="quickLoginAs('engineer', 'dev1234', this)">
+            <span style="font-size: 1.3rem;">👨‍💻</span>
             <div>
               <div style="font-weight: 700; font-size: 0.78rem;">임베디드 수석 엔지니어</div>
-              <div style="font-size: 0.65rem; color: #94a3b8;">Firmware Architect</div>
+              <div style="font-size: 0.65rem; color: #38bdf8;">ID: engineer (펌웨어/제어)</div>
             </div>
           </div>
-          <div class="dev-preset-btn" onclick="applyPresetProfile('qa_engineer', this)">
-            <span style="font-size: 1.2rem;">🧪</span>
+          <div class="dev-preset-btn" id="presetBtnQa" onclick="quickLoginAs('qa', 'qa1234', this)">
+            <span style="font-size: 1.3rem;">🧪</span>
             <div>
-              <div style="font-weight: 700; font-size: 0.78rem;">Matter 표준 QA 엔지니어</div>
-              <div style="font-size: 0.65rem; color: #94a3b8;">Certification Tester</div>
+              <div style="font-weight: 700; font-size: 0.78rem;">Matter 표준 QA 리드</div>
+              <div style="font-size: 0.65rem; color: #c084fc;">ID: qa (검증/클러스터)</div>
             </div>
           </div>
-          <div class="dev-preset-btn" onclick="applyPresetProfile('security_auditor', this)">
-            <span style="font-size: 1.2rem;">🛡️</span>
-            <div>
-              <div style="font-weight: 700; font-size: 0.78rem;">Security 1.1 감사관</div>
-              <div style="font-size: 0.65rem; color: #94a3b8;">Compliance Auditor</div>
-            </div>
-          </div>
-          <div class="dev-preset-btn" onclick="applyPresetProfile('guest_observer', this)">
-            <span style="font-size: 1.2rem;">👀</span>
+          <div class="dev-preset-btn" id="presetBtnGuest" onclick="quickLoginAs('guest', 'guest1234', this)">
+            <span style="font-size: 1.3rem;">👀</span>
             <div>
               <div style="font-weight: 700; font-size: 0.78rem;">게스트 참관자 (Guest)</div>
-              <div style="font-size: 0.65rem; color: #94a3b8;">Lab Observer</div>
+              <div style="font-size: 0.65rem; color: #94a3b8;">ID: guest (조회 전용)</div>
             </div>
           </div>
         </div>
       </div>
 
-      <div style="display: flex; flex-direction: column; gap: 10px;">
-        <label style="font-size: 0.76rem; font-weight: 700; color: #cbd5e1;">2. 직접 입력 및 세부 정보 수정</label>
-        <div style="display: grid; grid-template-columns: 80px 1fr; gap: 8px; align-items: center;">
-          <span style="font-size: 0.74rem; color: #94a3b8;">개발자 이름:</span>
-          <input type="text" id="devModalNameInput" class="board-selector" style="font-size: 0.78rem;" value="임베디드 수석 엔지니어">
-          
-          <span style="font-size: 0.74rem; color: #94a3b8;">담당 직책:</span>
-          <input type="text" id="devModalRoleInput" class="board-selector" style="font-size: 0.78rem;" value="Firmware Architect">
-          
-          <span style="font-size: 0.74rem; color: #94a3b8;">이메일:</span>
-          <input type="email" id="devModalEmailInput" class="board-selector" style="font-size: 0.78rem;" value="firmware-lead@nordic-lab.local">
-
-          <span style="font-size: 0.74rem; color: #94a3b8;">아바타:</span>
-          <input type="text" id="devModalAvatarInput" class="board-selector" style="font-size: 0.78rem; width: 60px;" value="👨‍💻">
+      <!-- Tab Content 2: Custom Login -->
+      <div id="authLoginContent" style="display: none;">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div>
+            <label style="font-size: 0.74rem; color: #94a3b8; display: block; margin-bottom: 4px;">아이디 (Username):</label>
+            <input type="text" id="authLoginUsername" class="board-selector" style="width: 100%; font-size: 0.8rem;" placeholder="예: admin, engineer">
+          </div>
+          <div>
+            <label style="font-size: 0.74rem; color: #94a3b8; display: block; margin-bottom: 4px;">비밀번호 (Password):</label>
+            <input type="password" id="authLoginPassword" class="board-selector" style="width: 100%; font-size: 0.8rem;" placeholder="비밀번호 입력">
+          </div>
+          <button class="hyper-btn hyper-btn-on" style="margin-top: 6px; width: 100%;" onclick="submitCustomLogin()">로그인 수행</button>
         </div>
       </div>
 
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
-        <button class="action-btn btn-secondary" onclick="closeDeveloperModal()">취소</button>
-        <button class="hyper-btn hyper-btn-on" onclick="saveDeveloperProfile()">저장 및 세션 반영</button>
+      <!-- Tab Content 3: Register -->
+      <div id="authRegisterContent" style="display: none;">
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div>
+            <label style="font-size: 0.74rem; color: #94a3b8; display: block; margin-bottom: 2px;">사용자 아이디 (영문 3자 이상):</label>
+            <input type="text" id="authRegUsername" class="board-selector" style="width: 100%; font-size: 0.8rem;" placeholder="예: dev_kim">
+          </div>
+          <div>
+            <label style="font-size: 0.74rem; color: #94a3b8; display: block; margin-bottom: 2px;">비밀번호 (4자 이상):</label>
+            <input type="password" id="authRegPassword" class="board-selector" style="width: 100%; font-size: 0.8rem;" placeholder="비밀번호">
+          </div>
+          <div>
+            <label style="font-size: 0.74rem; color: #94a3b8; display: block; margin-bottom: 2px;">실명 / 표시 이름:</label>
+            <input type="text" id="authRegName" class="board-selector" style="width: 100%; font-size: 0.8rem;" placeholder="예: 김노르딕 책임연구원">
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div>
+              <label style="font-size: 0.74rem; color: #94a3b8; display: block; margin-bottom: 2px;">역할 (Role):</label>
+              <select id="authRegRole" class="board-selector" style="width: 100%; font-size: 0.8rem;">
+                <option value="engineer">엔지니어 (Engineer)</option>
+                <option value="qa">QA 테스터 (QA)</option>
+                <option value="viewer">참관자 (Viewer)</option>
+                <option value="admin">관리자 (Admin)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size: 0.74rem; color: #94a3b8; display: block; margin-bottom: 2px;">이메일:</label>
+              <input type="email" id="authRegEmail" class="board-selector" style="width: 100%; font-size: 0.8rem;" placeholder="user@company.com">
+            </div>
+          </div>
+          <button class="hyper-btn hyper-btn-on" style="margin-top: 6px; width: 100%;" onclick="submitRegistration()">신규 계정 가입 및 로그인</button>
+        </div>
+      </div>
+
+      <div id="authModalMsgBox" style="display: none; padding: 8px 10px; border-radius: 6px; font-size: 0.74rem; margin-top: 6px;"></div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #1e293b; padding-top: 10px; margin-top: 6px;">
+        <span style="font-size: 0.72rem; color: var(--text-muted);" id="modalCurrentLoggedInUser">현재 로그인: 미등록</span>
+        <div style="display: flex; gap: 6px;">
+          <button class="action-btn btn-danger-soft" id="modalLogoutBtn" onclick="performLogout()">로그아웃</button>
+          <button class="action-btn btn-secondary" onclick="closeDeveloperModal()">닫기</button>
+        </div>
       </div>
     </div>
   </div>

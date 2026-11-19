@@ -222,12 +222,38 @@ function initSse() {
     } catch (err) {}
   });
 
+  eventSource.addEventListener('audit_log', (e) => {
+    try {
+      refreshAdminLogs();
+    } catch (err) {}
+  });
+
+  eventSource.addEventListener('audit_stats', (e) => {
+    try {
+      const stats = JSON.parse(e.data);
+      renderAdminStats(stats);
+    } catch (err) {}
+  });
+
   eventSource.addEventListener('access_log', (e) => {
     try {
       const log = JSON.parse(e.data);
       currentAuditLogs.unshift(log);
       if (currentAuditLogs.length > 500) currentAuditLogs.pop();
       renderAuditLogs(currentAuditLogs);
+    } catch (err) {}
+  });
+
+  eventSource.addEventListener('audit_log', (e) => {
+    try {
+      refreshAdminLogs();
+    } catch (err) {}
+  });
+
+  eventSource.addEventListener('audit_stats', (e) => {
+    try {
+      const stats = JSON.parse(e.data);
+      renderAdminStats(stats);
     } catch (err) {}
   });
 
@@ -1095,167 +1121,579 @@ function renderActiveSessions(summary) {
   }).join('');
 }
 
-function renderAuditLogs(logs = []) {
-  const tbody = document.getElementById('auditLogsTableBody');
-  const kpiLogs = document.getElementById('kpiTotalAuditLogs');
-  if (kpiLogs) kpiLogs.innerText = `${logs.length} 건`;
-  if (!tbody) return;
+// -------------------------------------------------------------
+// Global Authentication & Authorization State
+// -------------------------------------------------------------
+let currentAuthToken = localStorage.getItem('nm_auth_token') || null;
+let currentAuthUser = null;
+let adminSearchTimer = null;
 
-  const filtered = logs.filter(l => {
-    // Category filter
-    if (currentAuditCategory !== 'all') {
-      if (!l.eventType.toUpperCase().includes(currentAuditCategory.toUpperCase())) {
-        return false;
+// Intercept window.fetch to automatically provide Authorization: Bearer <token>
+const _nativeFetch = window.fetch;
+window.fetch = function(url, options = {}) {
+  options = options || {};
+  options.headers = options.headers || {};
+  if (currentAuthToken) {
+    if (options.headers instanceof Headers) {
+      if (!options.headers.has('Authorization')) {
+        options.headers.set('Authorization', `Bearer ${currentAuthToken}`);
+      }
+    } else {
+      if (!options.headers['Authorization']) {
+        options.headers['Authorization'] = `Bearer ${currentAuthToken}`;
       }
     }
-    // Search query filter
-    if (currentAuditSearch.trim()) {
-      const q = currentAuditSearch.toLowerCase();
-      const match = (l.userName || '').toLowerCase().includes(q) ||
-                    (l.userRole || '').toLowerCase().includes(q) ||
-                    (l.details || '').toLowerCase().includes(q) ||
-                    (l.ip || '').toLowerCase().includes(q) ||
-                    (l.eventType || '').toLowerCase().includes(q);
-      if (!match) return false;
-    }
-    return true;
-  });
+  }
+  return _nativeFetch.call(this, url, options);
+};
 
-  if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 20px;">일치하는 감사 로그가 없습니다.</td></tr>`;
+// -------------------------------------------------------------
+// Authentication Functions (Login, Logout, Register, Presets)
+// -------------------------------------------------------------
+async function initAuth() {
+  if (currentAuthToken) {
+    try {
+      const res = await fetch('/api/auth/me');
+      const data = await res.json();
+      if (data.authenticated && data.user) {
+        currentAuthUser = data.user;
+        updateTopbarAuthUi(currentAuthUser);
+        refreshAdminLogs();
+        refreshAdminUsers();
+        return;
+      }
+    } catch (e) {
+      console.warn('Auth check failed:', e);
+    }
+  }
+
+  // Default auto-login as admin if no session is set
+  await quickLoginAs('admin', 'admin1234', null, false);
+}
+
+function updateTopbarAuthUi(user) {
+  const chipAvatar = document.getElementById('topbarAvatar');
+  const chipName = document.getElementById('topbarUserName');
+  const chipRole = document.getElementById('topbarUserRole');
+  const authText = document.getElementById('topbarAuthText');
+  const authIcon = document.getElementById('topbarAuthIcon');
+  const modalUserTxt = document.getElementById('modalCurrentLoggedInUser');
+  const logoutBtn = document.getElementById('modalLogoutBtn');
+
+  if (user) {
+    if (chipAvatar) chipAvatar.innerText = user.avatar || '👤';
+    if (chipName) chipName.innerText = user.name || user.username;
+    if (chipRole) {
+      const roleKr = user.role === 'admin' ? '최고관리자 (Admin)' :
+                     user.role === 'engineer' ? '수석엔지니어 (Engineer)' :
+                     user.role === 'qa' ? 'QA 리드 (Tester)' : '참관자 (Viewer)';
+      chipRole.innerText = roleKr;
+    }
+    if (authText) authText.innerText = '로그아웃';
+    if (authIcon) authIcon.innerText = '🔒';
+    if (modalUserTxt) modalUserTxt.innerHTML = `현재 로그인: <strong style="color: var(--nordic-cyan);">${escapeHtml(user.name)}</strong> (${user.role})`;
+    if (logoutBtn) logoutBtn.style.display = 'inline-block';
+  } else {
+    if (chipAvatar) chipAvatar.innerText = '👤';
+    if (chipName) chipName.innerText = '미등록 게스트';
+    if (chipRole) chipRole.innerText = '로그인 필요';
+    if (authText) authText.innerText = '로그인';
+    if (authIcon) authIcon.innerText = '🔑';
+    if (modalUserTxt) modalUserTxt.innerText = '현재 로그인: 게스트 (미등록)';
+    if (logoutBtn) logoutBtn.style.display = 'none';
+  }
+}
+
+async function quickLoginAs(username, password, el, showNotification = true) {
+  if (el) {
+    document.querySelectorAll('.dev-preset-btn').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  try {
+    const res = await _nativeFetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+
+    if (data.success && data.token) {
+      currentAuthToken = data.token;
+      currentAuthUser = data.user;
+      localStorage.setItem('nm_auth_token', data.token);
+      document.cookie = `nm_token=${data.token}; path=/; max-age=864000`;
+
+      updateTopbarAuthUi(data.user);
+      if (showNotification) {
+        showToast(`👑 ${data.user.name} (${data.user.role}) 님으로 로그인되었습니다.`, '🔑');
+        closeDeveloperModal();
+      }
+      refreshAdminLogs();
+      refreshAdminUsers();
+    } else {
+      showToast(data.message || '로그인에 실패했습니다.', '⚠️');
+    }
+  } catch (err) {
+    console.error(err);
+    showToast('로그인 요청 중 서버 오류가 발생했습니다.', '❌');
+  }
+}
+
+async function submitCustomLogin() {
+  const username = (document.getElementById('authLoginUsername').value || '').trim();
+  const password = (document.getElementById('authLoginPassword').value || '').trim();
+  const msgBox = document.getElementById('authModalMsgBox');
+
+  if (!username || !password) {
+    if (msgBox) {
+      msgBox.style.display = 'block';
+      msgBox.style.background = 'rgba(239, 68, 68, 0.2)';
+      msgBox.style.color = '#f87171';
+      msgBox.innerText = '아이디와 비밀번호를 모두 입력해주세요.';
+    }
     return;
   }
 
-  tbody.innerHTML = filtered.map(l => {
-    const isSuccess = l.status === 'SUCCESS';
+  try {
+    const res = await _nativeFetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+
+    if (data.success && data.token) {
+      currentAuthToken = data.token;
+      currentAuthUser = data.user;
+      localStorage.setItem('nm_auth_token', data.token);
+      document.cookie = `nm_token=${data.token}; path=/; max-age=864000`;
+
+      updateTopbarAuthUi(data.user);
+      showToast(`🔑 ${data.user.name} 님 환영합니다!`, '✅');
+      closeDeveloperModal();
+      refreshAdminLogs();
+      refreshAdminUsers();
+    } else {
+      if (msgBox) {
+        msgBox.style.display = 'block';
+        msgBox.style.background = 'rgba(239, 68, 68, 0.2)';
+        msgBox.style.color = '#f87171';
+        msgBox.innerText = data.message || '로그인 실패';
+      }
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function submitRegistration() {
+  const username = (document.getElementById('authRegUsername').value || '').trim();
+  const password = (document.getElementById('authRegPassword').value || '').trim();
+  const name = (document.getElementById('authRegName').value || '').trim();
+  const role = document.getElementById('authRegRole').value;
+  const email = (document.getElementById('authRegEmail').value || '').trim();
+  const msgBox = document.getElementById('authModalMsgBox');
+
+  if (!username || !password) {
+    if (msgBox) {
+      msgBox.style.display = 'block';
+      msgBox.style.background = 'rgba(239, 68, 68, 0.2)';
+      msgBox.style.color = '#f87171';
+      msgBox.innerText = '아이디와 비밀번호는 필수 입력 항목입니다.';
+    }
+    return;
+  }
+
+  try {
+    const res = await _nativeFetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, name, role, email })
+    });
+    const data = await res.json();
+
+    if (data.success && data.token) {
+      currentAuthToken = data.token;
+      currentAuthUser = data.user;
+      localStorage.setItem('nm_auth_token', data.token);
+      document.cookie = `nm_token=${data.token}; path=/; max-age=864000`;
+
+      updateTopbarAuthUi(data.user);
+      showToast(`🎉 계정이 등록되었으며 로그인되었습니다: ${data.user.name}`, '✅');
+      closeDeveloperModal();
+      refreshAdminLogs();
+      refreshAdminUsers();
+    } else {
+      if (msgBox) {
+        msgBox.style.display = 'block';
+        msgBox.style.background = 'rgba(239, 68, 68, 0.2)';
+        msgBox.style.color = '#f87171';
+        msgBox.innerText = data.message || '회원가입 실패';
+      }
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function performLogout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (e) {}
+
+  currentAuthToken = null;
+  currentAuthUser = null;
+  localStorage.removeItem('nm_auth_token');
+  document.cookie = 'nm_token=; path=/; max-age=0';
+
+  updateTopbarAuthUi(null);
+  closeDeveloperModal();
+  showToast('안전하게 로그아웃되었습니다.', '🔒');
+  refreshAdminLogs();
+}
+
+function handleAuthButtonClick() {
+  if (currentAuthUser) {
+    performLogout();
+  } else {
+    openDeveloperModal();
+    switchAuthModalTab('preset');
+  }
+}
+
+function switchAuthModalTab(tab) {
+  const tabs = ['preset', 'login', 'register'];
+  tabs.forEach(t => {
+    const btn = document.getElementById(`authTab${t.charAt(0).toUpperCase() + t.slice(1)}Btn`);
+    const content = document.getElementById(`auth${t.charAt(0).toUpperCase() + t.slice(1)}Content`);
+    if (btn) btn.classList.toggle('active', t === tab);
+    if (content) content.style.display = t === tab ? 'block' : 'none';
+  });
+
+  const msgBox = document.getElementById('authModalMsgBox');
+  if (msgBox) msgBox.style.display = 'none';
+}
+
+function openDeveloperModal() {
+  const modal = document.getElementById('devProfileModal');
+  if (modal) modal.classList.add('active');
+}
+
+function closeDeveloperModal() {
+  const modal = document.getElementById('devProfileModal');
+  if (modal) modal.classList.remove('active');
+}
+
+// -------------------------------------------------------------
+// Admin Multi-Dimensional Audit Log Engine
+// -------------------------------------------------------------
+async function refreshAdminLogs() {
+  const userSelect = document.getElementById('adminFilterUser');
+  const boardSelect = document.getElementById('adminFilterBoard');
+  const categorySelect = document.getElementById('adminFilterCategory');
+  const statusSelect = document.getElementById('adminFilterStatus');
+  const searchInput = document.getElementById('adminFilterSearch');
+
+  const userId = userSelect ? userSelect.value : 'all';
+  const boardId = boardSelect ? boardSelect.value : 'all';
+  const category = categorySelect ? categorySelect.value : 'all';
+  const status = statusSelect ? statusSelect.value : 'all';
+  const search = searchInput ? searchInput.value.trim() : '';
+
+  const query = new URLSearchParams({
+    userId,
+    boardId,
+    category,
+    status,
+    search,
+    limit: '150'
+  });
+
+  try {
+    const [logsRes, statsRes] = await Promise.all([
+      fetch(`/api/admin/logs?${query.toString()}`),
+      fetch('/api/admin/stats')
+    ]);
+
+    const logsData = await logsRes.json();
+    const statsData = await statsRes.json();
+
+    renderAdminLogsTable(logsData.logs || []);
+    renderAdminStats(statsData);
+
+    const countInfo = document.getElementById('adminLogsCountInfo');
+    if (countInfo) {
+      countInfo.innerText = `총 ${logsData.total || 0}건 중 최근 ${logsData.logs ? logsData.logs.length : 0}건 표시`;
+    }
+  } catch (err) {
+    console.error('Error refreshing admin logs:', err);
+  }
+}
+
+function debounceAdminSearch() {
+  clearTimeout(adminSearchTimer);
+  adminSearchTimer = setTimeout(() => {
+    refreshAdminLogs();
+  }, 250);
+}
+
+function renderAdminStats(stats) {
+  if (!stats) return;
+
+  const kpiLogs = document.getElementById('kpiTotalAuditLogs');
+  const kpiToday = document.getElementById('kpiTodayLogsText');
+  const kpiUsers = document.getElementById('kpiActiveUsersCount');
+  const kpiTopBoard = document.getElementById('kpiTopBoard');
+  const kpiTopBoardRatio = document.getElementById('kpiTopBoardRatio');
+  const kpiScore = document.getElementById('kpiSecurityScore');
+
+  if (kpiLogs) kpiLogs.innerText = `${stats.totalLogs || 0} 건`;
+  if (kpiToday) kpiToday.innerText = `최근 24시간: ${stats.todayLogs || 0}건 기록`;
+  if (kpiUsers) kpiUsers.innerText = `${stats.activeUsers24h || 1} 명`;
+
+  // Find top board
+  if (stats.boardDistribution) {
+    let topB = 'nRF5340 DK';
+    let maxCount = 0;
+    const boardNames = {
+      nrf5340dk: 'nRF5340 DK',
+      nrf54lm20dk: 'nRF54LM20 DK',
+      nrf54l15dk: 'nRF54L15 DK',
+      nrf52840dk: 'nRF52840 DK',
+      nrf7002dk: 'nRF7002 DK',
+      thingy53: 'Thingy:53',
+      system: '시스템 공통'
+    };
+    for (const [bId, count] of Object.entries(stats.boardDistribution)) {
+      if (count > maxCount) {
+        maxCount = count;
+        topB = boardNames[bId] || bId;
+      }
+    }
+    const ratio = stats.totalLogs > 0 ? Math.round((maxCount / stats.totalLogs) * 100) : 100;
+    if (kpiTopBoard) kpiTopBoard.innerText = topB;
+    if (kpiTopBoardRatio) kpiTopBoardRatio.innerText = `비중 ${ratio}% (${maxCount}건)`;
+  }
+
+  if (kpiScore) {
+    const score = stats.securityScore || 100;
+    kpiScore.innerText = `${score} 점`;
+    kpiScore.style.color = score >= 90 ? '#4ade80' : score >= 75 ? '#fbbf24' : '#f87171';
+  }
+}
+
+function renderAdminLogsTable(logs = []) {
+  const tbody = document.getElementById('auditLogsTableBody');
+  if (!tbody) return;
+
+  if (logs.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 24px;">조건에 일치하는 감사 로그가 없습니다.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = logs.map(l => {
+    const timeStr = l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : '-';
+    const dateStr = l.timestamp ? new Date(l.timestamp).toLocaleDateString().slice(5) : '';
+    
+    // Status badge style
+    let statusBadge = '<span class="badge-status badge-status-info">INFO</span>';
+    if (l.status === 'SUCCESS') statusBadge = '<span class="badge-status badge-status-success">SUCCESS</span>';
+    else if (l.status === 'WARNING') statusBadge = '<span class="badge-status badge-status-warning">WARNING</span>';
+    else if (l.status === 'ERROR') statusBadge = '<span class="badge-status badge-status-error">ERROR</span>';
+
+    // Role badge
+    let roleClass = 'role-viewer';
+    if (l.userRole === 'admin') roleClass = 'role-admin';
+    else if (l.userRole === 'engineer') roleClass = 'role-engineer';
+    else if (l.userRole === 'qa') roleClass = 'role-qa';
+
     return `
       <tr>
-        <td style="font-family: var(--font-mono); font-size: 0.72rem; color: #94a3b8;">${l.timeFormatted || l.timestamp.split('T')[1].slice(0, 8)}</td>
+        <td style="font-family: var(--font-mono); font-size: 0.72rem; color: #94a3b8; white-space: nowrap;">
+          ${dateStr} ${timeStr}
+        </td>
         <td>
-          <div style="display: flex; align-items: center; gap: 6px; font-weight: 600; color: #fff;">
-            <span>${l.userAvatar || '👤'}</span>
-            <span>${escapeHtml(l.userName || '시스템')}</span>
+          <div style="display: flex; align-items: center; gap: 6px; font-weight: 700; color: #fff;">
+            <span>${l.userId === 'admin' ? '👑' : l.userId === 'engineer' ? '👨‍💻' : l.userId === 'qa' ? '🧪' : '👤'}</span>
+            <span title="${escapeHtml(l.userId)}">${escapeHtml(l.userName || l.userId)}</span>
           </div>
         </td>
-        <td style="color: var(--nordic-cyan); font-size: 0.74rem;">${escapeHtml(l.userRole || '-')}</td>
-        <td style="font-family: var(--font-mono); font-size: 0.72rem;">${escapeHtml(l.ip || '127.0.0.1')}</td>
-        <td style="font-size: 0.72rem; color: #cbd5e1;">${escapeHtml(l.clientEnv || '-')}</td>
-        <td><span class="cluster-tag" style="background: rgba(255,255,255,0.06); color: #cbd5e1; border-color: rgba(255,255,255,0.15);">${escapeHtml(l.eventType)}</span></td>
-        <td style="font-size: 0.74rem; color: #f1f5f9;">${escapeHtml(l.details || '-')}</td>
         <td>
-          <span style="font-size: 0.68rem; font-weight: 700; color: ${isSuccess ? '#4ade80' : '#ef4444'};">
-            ${isSuccess ? '● OK' : '✕ FAIL'}
+          <span class="admin-role-badge ${roleClass}">${escapeHtml((l.userRole || 'guest').toUpperCase())}</span>
+        </td>
+        <td style="font-size: 0.73rem; color: var(--nordic-cyan);">
+          ${escapeHtml(l.boardName || l.boardId || 'system')}
+        </td>
+        <td>
+          <span class="cluster-tag" style="background: rgba(255,255,255,0.06); color: #cbd5e1; border-color: rgba(255,255,255,0.15); font-size: 0.65rem;">
+            ${escapeHtml(l.category || 'SYSTEM')}
           </span>
+        </td>
+        <td style="font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; color: #e2e8f0;">
+          ${escapeHtml(l.action)}
+        </td>
+        <td style="font-size: 0.74rem; color: #cbd5e1; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(l.details)}">
+          ${escapeHtml(l.details || '-')}
+        </td>
+        <td>${statusBadge}</td>
+        <td style="font-family: var(--font-mono); font-size: 0.7rem; color: #94a3b8;">
+          ${escapeHtml(l.ip || '127.0.0.1')}
         </td>
       </tr>
     `;
   }).join('');
 }
 
-function filterAuditLogsCategory(category, el) {
-  currentAuditCategory = category;
-  document.querySelectorAll('#accessLogsTab .sample-filter-btn').forEach(b => b.classList.remove('active'));
-  if (el) el.classList.add('active');
-  renderAuditLogs(currentAuditLogs);
-}
-
-function filterAuditLogsTable(query) {
-  currentAuditSearch = query || '';
-  renderAuditLogs(currentAuditLogs);
-}
-
-function exportAuditLogsCsv() {
-  window.open('/api/access-logs/export', '_blank');
-  showToast('📥 감사 로그 CSV 다운로드를 시작합니다.', '📥');
-}
-
 // -------------------------------------------------------------
-// Developer Profile Modal Actions
+// Admin Team User Management
 // -------------------------------------------------------------
-function openDeveloperModal() {
-  const modal = document.getElementById('devProfileModal');
-  if (modal) {
-    modal.classList.add('active');
-  }
-}
-
-function closeDeveloperModal() {
-  const modal = document.getElementById('devProfileModal');
-  if (modal) {
-    modal.classList.remove('active');
-  }
-}
-
-const PRESET_PROFILES = {
-  lead_dev: { name: '임베디드 수석 엔지니어', role: 'Firmware Architect', email: 'firmware-lead@nordic-lab.local', avatar: '👨‍💻' },
-  qa_engineer: { name: 'Matter 표준 QA 엔지니어', role: 'Certification Tester', email: 'qa-tester@nordic-lab.local', avatar: '🧪' },
-  security_auditor: { name: 'Security 1.1 감사관', role: 'Compliance Auditor', email: 'sec-audit@nordic-lab.local', avatar: '🛡️' },
-  guest_observer: { name: '게스트 참관자 (Guest)', role: 'Lab Observer', email: 'guest@nordic-lab.local', avatar: '👀' }
-};
-
-function applyPresetProfile(presetId, el) {
-  document.querySelectorAll('.dev-preset-btn').forEach(b => b.classList.remove('active'));
-  if (el) el.classList.add('active');
-
-  const p = PRESET_PROFILES[presetId];
-  if (!p) return;
-
-  const nameInput = document.getElementById('devModalNameInput');
-  const roleInput = document.getElementById('devModalRoleInput');
-  const emailInput = document.getElementById('devModalEmailInput');
-  const avatarInput = document.getElementById('devModalAvatarInput');
-
-  if (nameInput) nameInput.value = p.name;
-  if (roleInput) roleInput.value = p.role;
-  if (emailInput) emailInput.value = p.email;
-  if (avatarInput) avatarInput.value = p.avatar;
-}
-
-async function saveDeveloperProfile() {
-  const name = document.getElementById('devModalNameInput').value.trim();
-  const role = document.getElementById('devModalRoleInput').value.trim();
-  const email = document.getElementById('devModalEmailInput').value.trim();
-  const avatar = document.getElementById('devModalAvatarInput').value.trim() || '👨‍💻';
-
-  const profile = { name, role, email, avatar };
-  localStorage.setItem('nordic_studio_profile', JSON.stringify(profile));
-
-  updateTopbarProfileUi(profile);
-  closeDeveloperModal();
-
-  showToast(`👤 개발자 프로필 적용 완료: ${name} (${role})`, '✅');
-
+async function refreshAdminUsers() {
   try {
-    await fetch('/api/sessions/profile', {
+    const res = await fetch('/api/admin/users');
+    const data = await res.json();
+    renderAdminUsersTable(data.users || []);
+  } catch (err) {
+    console.error('Error refreshing admin users:', err);
+  }
+}
+
+function renderAdminUsersTable(users = []) {
+  const tbody = document.getElementById('adminUsersTableBody');
+  if (!tbody) return;
+
+  if (users.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 18px;">등록된 사용자가 없습니다.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = users.map(u => {
+    const isBlocked = u.status === 'blocked';
+    const isAdmin = u.username === 'admin';
+    const lastLogin = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '미기록';
+
+    return `
+      <tr>
+        <td style="font-family: var(--font-mono); font-weight: 700; color: #fff;">
+          ${escapeHtml(u.avatar || '👤')} ${escapeHtml(u.username)}
+        </td>
+        <td style="color: #e2e8f0; font-weight: 600;">
+          ${escapeHtml(u.name)}
+        </td>
+        <td>
+          <select class="admin-filter-select" style="font-size: 0.72rem; padding: 2px 6px;" onchange="updateUserRole('${escapeHtml(u.username)}', this.value)" ${isAdmin ? 'disabled' : ''}>
+            <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin (관리자)</option>
+            <option value="engineer" ${u.role === 'engineer' ? 'selected' : ''}>Engineer (개발자)</option>
+            <option value="qa" ${u.role === 'qa' ? 'selected' : ''}>QA (검증원)</option>
+            <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>Viewer (참관자)</option>
+          </select>
+        </td>
+        <td style="font-size: 0.72rem; color: #94a3b8;">
+          ${escapeHtml(u.email || '-')}
+        </td>
+        <td>
+          <span class="badge-status ${isBlocked ? 'badge-status-error' : 'badge-status-success'}">
+            ${isBlocked ? '차단됨 (BLOCKED)' : '정상 활성 (ACTIVE)'}
+          </span>
+        </td>
+        <td style="font-size: 0.7rem; color: #94a3b8;">
+          ${lastLogin}
+        </td>
+        <td>
+          ${isAdmin ? '<span style="font-size: 0.7rem; color: #94a3b8;">최고관리자 (보호됨)</span>' : `
+            <button class="action-btn ${isBlocked ? 'btn-primary' : 'btn-danger-soft'}" style="font-size: 0.68rem; padding: 3px 8px;" onclick="updateUserStatus('${escapeHtml(u.username)}', '${isBlocked ? 'active' : 'blocked'}')">
+              ${isBlocked ? '✅ 계정 활성화' : '🚫 계정 차단'}
+            </button>
+          `}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function updateUserStatus(username, status) {
+  try {
+    const res = await fetch('/api/admin/users/status', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-session-id': clientSessionId
-      },
-      body: JSON.stringify({ sessionId: clientSessionId, ...profile })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, status })
     });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`사용자 [${username}] 상태가 [${status}]로 변경되었습니다.`, '⚙️');
+      refreshAdminUsers();
+      refreshAdminLogs();
+    } else {
+      showToast(data.message || '상태 변경 실패', '⚠️');
+    }
   } catch (err) {
     console.error(err);
   }
+}
+
+async function updateUserRole(username, role) {
+  try {
+    const res = await fetch('/api/admin/users/role', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, role })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`사용자 [${username}] 권한이 [${role}]로 변경되었습니다.`, '👑');
+      refreshAdminUsers();
+      refreshAdminLogs();
+    } else {
+      showToast(data.message || '권한 변경 실패', '⚠️');
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function confirmPurgeLogs() {
+  if (!confirm('경고: 모든 감사 로그 데이터를 영구적으로 초기화하시겠습니까?\n이 작업은 시스템 무결성 보안 감사에 기록됩니다.')) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/admin/logs/clear', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('🗑️ 모든 감사 로그가 초기화되었습니다.', '⚠️');
+      refreshAdminLogs();
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function exportAdminLogsCsv() {
+  const userSelect = document.getElementById('adminFilterUser');
+  const boardSelect = document.getElementById('adminFilterBoard');
+  const categorySelect = document.getElementById('adminFilterCategory');
+  const statusSelect = document.getElementById('adminFilterStatus');
+  const searchInput = document.getElementById('adminFilterSearch');
+
+  const query = new URLSearchParams({
+    userId: userSelect ? userSelect.value : 'all',
+    boardId: boardSelect ? boardSelect.value : 'all',
+    category: categorySelect ? categorySelect.value : 'all',
+    status: statusSelect ? statusSelect.value : 'all',
+    search: searchInput ? searchInput.value.trim() : ''
+  });
+
+  window.open(`/api/admin/logs/export?${query.toString()}`, '_blank');
+  showToast('📥 필터링된 감사 로그 CSV 다운로드를 시작합니다.', '📥');
 }
 
 // -------------------------------------------------------------
 // Initialization on DOM Ready
 // -------------------------------------------------------------
 window.addEventListener('DOMContentLoaded', () => {
-  // Load saved developer profile if any
-  try {
-    const saved = localStorage.getItem('nordic_studio_profile');
-    if (saved) {
-      const p = JSON.parse(saved);
-      updateTopbarProfileUi(p);
-      fetch('/api/sessions/profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-session-id': clientSessionId },
-        body: JSON.stringify({ sessionId: clientSessionId, ...p })
-      }).catch(() => {});
-    }
-  } catch (err) {}
+  // Initialize Authentication & User Session
+  initAuth();
+
   // Initialize Photorealistic Canvas Engine
   if (typeof PhotorealDKRenderer === 'function') {
     boardRenderer = new PhotorealDKRenderer('photorealCanvas');
@@ -1267,5 +1705,6 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     }
   }
+
   initSse();
 });

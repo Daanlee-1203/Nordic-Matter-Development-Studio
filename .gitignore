@@ -22,3 +22,5 @@ build/
 
 # Unrelated subproject
 ai-ict-portal/
+.vercel
+.env*
