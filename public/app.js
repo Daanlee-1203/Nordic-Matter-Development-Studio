@@ -1205,6 +1205,14 @@ async function initAuth() {
   localStorage.removeItem('nm_auth_token');
   document.cookie = 'nm_token=; path=/; max-age=0';
   updateTopbarAuthUi(null);
+
+  // Prompt login dialog on initial unauthenticated load
+  setTimeout(() => {
+    if (!currentAuthUser) {
+      openDeveloperModal();
+      switchAuthModalTab('login');
+    }
+  }, 350);
 }
 
 function updateTopbarAuthUi(user) {
@@ -1290,40 +1298,27 @@ function enforceUiPermissions(user) {
   }
 }
 
+function fillLoginFields(username, password) {
+  switchAuthModalTab('login');
+  const uInput = document.getElementById('authLoginUsername');
+  const pInput = document.getElementById('authLoginPassword');
+  if (uInput) uInput.value = username;
+  if (pInput) {
+    pInput.value = password;
+    pInput.focus();
+  }
+  const msgBox = document.getElementById('authModalMsgBox');
+  if (msgBox) {
+    msgBox.style.display = 'block';
+    msgBox.style.background = 'rgba(56, 189, 248, 0.15)';
+    msgBox.style.color = '#7dd3fc';
+    msgBox.innerText = `💡 [${username}] 계정 정보가 입력되었습니다. 아래 [서버 인증 및 로그인 수행] 버튼을 누르거나 Enter를 입력하세요.`;
+  }
+}
+
 async function quickLoginAs(username, password, el, showNotification = true) {
-  if (el) {
-    document.querySelectorAll('.dev-preset-btn').forEach(b => b.classList.remove('active'));
-    el.classList.add('active');
-  }
-
-  try {
-    const res = await _nativeFetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
-    const data = await res.json();
-
-    if (data.success && data.token) {
-      currentAuthToken = data.token;
-      currentAuthUser = data.user;
-      localStorage.setItem('nm_auth_token', data.token);
-      document.cookie = `nm_token=${data.token}; path=/; max-age=864000`;
-
-      updateTopbarAuthUi(data.user);
-      if (showNotification) {
-        showToast(`👑 ${data.user.name} (${data.user.role}) 님으로 로그인되었습니다.`, '🔑');
-        closeDeveloperModal();
-      }
-      refreshAdminLogs();
-      refreshAdminUsers();
-    } else {
-      showToast(data.message || '로그인에 실패했습니다.', '⚠️');
-    }
-  } catch (err) {
-    console.error(err);
-    showToast('로그인 요청 중 서버 오류가 발생했습니다.', '❌');
-  }
+  fillLoginFields(username, password);
+  await submitCustomLogin();
 }
 
 async function submitCustomLogin() {
@@ -1334,10 +1329,11 @@ async function submitCustomLogin() {
   if (!username || !password) {
     if (msgBox) {
       msgBox.style.display = 'block';
-      msgBox.style.background = 'rgba(239, 68, 68, 0.2)';
+      msgBox.style.background = 'rgba(239, 68, 68, 0.25)';
       msgBox.style.color = '#f87171';
-      msgBox.innerText = '아이디와 비밀번호를 모두 입력해주세요.';
+      msgBox.innerText = '⚠️ 아이디와 비밀번호를 모두 입력해주세요.';
     }
+    showToast('⚠️ 아이디와 비밀번호를 모두 입력해주세요.', '⚠️');
     return;
   }
 
@@ -1356,20 +1352,27 @@ async function submitCustomLogin() {
       document.cookie = `nm_token=${data.token}; path=/; max-age=864000`;
 
       updateTopbarAuthUi(data.user);
-      showToast(`🔑 ${data.user.name} 님 환영합니다!`, '✅');
+      showToast(`🎉 서버 인증 성공: ${data.user.name} (${data.user.role}) 님 세션 활성화!`, '🔑');
       closeDeveloperModal();
       refreshAdminLogs();
       refreshAdminUsers();
     } else {
       if (msgBox) {
         msgBox.style.display = 'block';
-        msgBox.style.background = 'rgba(239, 68, 68, 0.2)';
+        msgBox.style.background = 'rgba(239, 68, 68, 0.25)';
         msgBox.style.color = '#f87171';
-        msgBox.innerText = data.message || '로그인 실패';
+        msgBox.innerText = `❌ ${data.message || '아이디 또는 비밀번호가 올바르지 않습니다.'}`;
       }
+      showToast(`❌ ${data.message || '로그인 실패: 자격 증명을 확인하세요.'}`, '⚠️');
     }
   } catch (err) {
     console.error(err);
+    if (msgBox) {
+      msgBox.style.display = 'block';
+      msgBox.style.background = 'rgba(239, 68, 68, 0.25)';
+      msgBox.style.color = '#f87171';
+      msgBox.innerText = '❌ 서버와 통신 중 오류가 발생했습니다.';
+    }
   }
 }
 
@@ -1444,12 +1447,12 @@ function handleAuthButtonClick() {
     performLogout();
   } else {
     openDeveloperModal();
-    switchAuthModalTab('preset');
+    switchAuthModalTab('login');
   }
 }
 
 function switchAuthModalTab(tab) {
-  const tabs = ['preset', 'login', 'register'];
+  const tabs = ['login', 'register'];
   tabs.forEach(t => {
     const btn = document.getElementById(`authTab${t.charAt(0).toUpperCase() + t.slice(1)}Btn`);
     const content = document.getElementById(`auth${t.charAt(0).toUpperCase() + t.slice(1)}Content`);
@@ -1459,6 +1462,13 @@ function switchAuthModalTab(tab) {
 
   const msgBox = document.getElementById('authModalMsgBox');
   if (msgBox) msgBox.style.display = 'none';
+
+  if (tab === 'login') {
+    setTimeout(() => {
+      const uInput = document.getElementById('authLoginUsername');
+      if (uInput) uInput.focus();
+    }, 100);
+  }
 }
 
 function openDeveloperModal() {

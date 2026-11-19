@@ -1799,62 +1799,60 @@ build/
         <button class="link-btn" onclick="closeDeveloperModal()" style="font-size: 1.1rem; color: #94a3b8;">✕</button>
       </div>
 
-      <!-- Modal Tabs: 1-Click Presets / Custom Login / Register -->
+      <!-- Modal Tabs: Login / Register -->
       <div class="auth-modal-tabs">
-        <button class="auth-modal-tab-btn active" id="authTabPresetBtn" onclick="switchAuthModalTab('preset')">⚡ 원클릭 계정 전환</button>
-        <button class="auth-modal-tab-btn" id="authTabLoginBtn" onclick="switchAuthModalTab('login')">🔑 정식 로그인</button>
-        <button class="auth-modal-tab-btn" id="authTabRegisterBtn" onclick="switchAuthModalTab('register')">📝 신규 회원가입</button>
+        <button class="auth-modal-tab-btn active" id="authTabLoginBtn" onclick="switchAuthModalTab('login')">🔑 정식 계정 로그인</button>
+        <button class="auth-modal-tab-btn" id="authTabRegisterBtn" onclick="switchAuthModalTab('register')">📝 신규 계정 가입</button>
       </div>
 
-      <!-- Tab Content 1: 1-Click Presets -->
-      <div id="authPresetContent">
-        <label style="font-size: 0.76rem; font-weight: 700; color: #cbd5e1; display: block; margin-bottom: 6px;">
-          팀 표준 계정으로 즉시 전환 (원클릭 로그인):
-        </label>
-        <div class="dev-preset-grid">
-          <div class="dev-preset-btn active" id="presetBtnAdmin" onclick="quickLoginAs('admin', 'admin1234', this)">
-            <span style="font-size: 1.3rem;">👑</span>
-            <div>
-              <div style="font-weight: 700; font-size: 0.78rem;">시스템 최고 관리자</div>
-              <div style="font-size: 0.65rem; color: #f87171;">ID: admin (전체 권한)</div>
-            </div>
+      <!-- Tab Content 1: Secure Login (Username & Password) -->
+      <div id="authLoginContent">
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div>
+            <label style="font-size: 0.76rem; font-weight: 700; color: #cbd5e1; display: block; margin-bottom: 4px;">
+              👤 아이디 (Username):
+            </label>
+            <input type="text" id="authLoginUsername" class="board-selector" style="width: 100%; font-size: 0.84rem; padding: 8px 10px;" placeholder="아이디를 입력하세요 (예: admin, engineer)" autocomplete="username">
           </div>
-          <div class="dev-preset-btn" id="presetBtnEngineer" onclick="quickLoginAs('engineer', 'dev1234', this)">
-            <span style="font-size: 1.3rem;">👨‍💻</span>
-            <div>
-              <div style="font-weight: 700; font-size: 0.78rem;">임베디드 수석 엔지니어</div>
-              <div style="font-size: 0.65rem; color: #38bdf8;">ID: engineer (펌웨어/제어)</div>
-            </div>
+          <div>
+            <label style="font-size: 0.76rem; font-weight: 700; color: #cbd5e1; display: block; margin-bottom: 4px;">
+              🔒 비밀번호 (Password):
+            </label>
+            <input type="password" id="authLoginPassword" class="board-selector" style="width: 100%; font-size: 0.84rem; padding: 8px 10px;" placeholder="비밀번호를 입력하세요" autocomplete="current-password" onkeydown="if(event.key === 'Enter') submitCustomLogin()">
           </div>
-          <div class="dev-preset-btn" id="presetBtnQa" onclick="quickLoginAs('qa', 'qa1234', this)">
-            <span style="font-size: 1.3rem;">🧪</span>
-            <div>
-              <div style="font-weight: 700; font-size: 0.78rem;">Matter 표준 QA 리드</div>
-              <div style="font-size: 0.65rem; color: #c084fc;">ID: qa (검증/클러스터)</div>
-            </div>
-          </div>
-          <div class="dev-preset-btn" id="presetBtnGuest" onclick="quickLoginAs('guest', 'guest1234', this)">
-            <span style="font-size: 1.3rem;">👀</span>
-            <div>
-              <div style="font-weight: 700; font-size: 0.78rem;">게스트 참관자 (Guest)</div>
-              <div style="font-size: 0.65rem; color: #94a3b8;">ID: guest (조회 전용)</div>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <!-- Tab Content 2: Custom Login -->
-      <div id="authLoginContent" style="display: none;">
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-          <div>
-            <label style="font-size: 0.74rem; color: #94a3b8; display: block; margin-bottom: 4px;">아이디 (Username):</label>
-            <input type="text" id="authLoginUsername" class="board-selector" style="width: 100%; font-size: 0.8rem;" placeholder="예: admin, engineer">
+          <button class="hyper-btn hyper-btn-on" style="margin-top: 4px; width: 100%; padding: 10px; font-size: 0.88rem; font-weight: 700;" onclick="submitCustomLogin()">
+            🔑 서버 인증 및 로그인 수행
+          </button>
+
+          <!-- Registered Accounts Reference Guide -->
+          <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-top: 4px;">
+            <div style="font-size: 0.72rem; font-weight: 700; color: #94a3b8; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+              <span>ℹ️ 시스템 사전 등록 테스트 계정 안내 (클릭 시 입력폼 자동완성)</span>
+              <span style="font-size: 0.65rem; color: #f59e0b;">* 암호화 검증 필수</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.72rem;">
+              <div style="background: rgba(255,255,255,0.03); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); cursor: pointer;" onclick="fillLoginFields('admin', 'admin1234')" title="클릭하여 폼에 입력">
+                <div style="font-weight: 700; color: #f87171;">👑 최고 관리자 (Admin)</div>
+                <div style="color: #cbd5e1; font-family: var(--font-mono); font-size: 0.68rem;">ID: <code>admin</code> / PW: <code>admin1234</code></div>
+              </div>
+              <div style="background: rgba(255,255,255,0.03); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); cursor: pointer;" onclick="fillLoginFields('engineer', 'dev1234')" title="클릭하여 폼에 입력">
+                <div style="font-weight: 700; color: #38bdf8;">👨‍💻 수석 엔지니어 (Engineer)</div>
+                <div style="color: #cbd5e1; font-family: var(--font-mono); font-size: 0.68rem;">ID: <code>engineer</code> / PW: <code>dev1234</code></div>
+              </div>
+              <div style="background: rgba(255,255,255,0.03); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); cursor: pointer;" onclick="fillLoginFields('qa', 'qa1234')" title="클릭하여 폼에 입력">
+                <div style="font-weight: 700; color: #c084fc;">🧪 QA 리드 (Tester)</div>
+                <div style="color: #cbd5e1; font-family: var(--font-mono); font-size: 0.68rem;">ID: <code>qa</code> / PW: <code>qa1234</code></div>
+              </div>
+              <div style="background: rgba(255,255,255,0.03); padding: 6px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); cursor: pointer;" onclick="fillLoginFields('guest', 'guest1234')" title="클릭하여 폼에 입력">
+                <div style="font-weight: 700; color: #94a3b8;">👀 게스트 참관자 (Viewer)</div>
+                <div style="color: #cbd5e1; font-family: var(--font-mono); font-size: 0.68rem;">ID: <code>guest</code> / PW: <code>guest1234</code></div>
+              </div>
+            </div>
+            <div style="font-size: 0.65rem; color: #64748b; margin-top: 6px;">
+              * 보안 정책: 서버 단방향 SHA-256 해시 검증을 정상 통과해야만 해당 계정 권한이 부여됩니다.
+            </div>
           </div>
-          <div>
-            <label style="font-size: 0.74rem; color: #94a3b8; display: block; margin-bottom: 4px;">비밀번호 (Password):</label>
-            <input type="password" id="authLoginPassword" class="board-selector" style="width: 100%; font-size: 0.8rem;" placeholder="비밀번호 입력">
-          </div>
-          <button class="hyper-btn hyper-btn-on" style="margin-top: 6px; width: 100%;" onclick="submitCustomLogin()">로그인 수행</button>
         </div>
       </div>
 
@@ -1895,10 +1893,10 @@ build/
       <div id="authModalMsgBox" style="display: none; padding: 8px 10px; border-radius: 6px; font-size: 0.74rem; margin-top: 6px;"></div>
 
       <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #1e293b; padding-top: 10px; margin-top: 6px;">
-        <span style="font-size: 0.72rem; color: var(--text-muted);" id="modalCurrentLoggedInUser">현재 로그인: 미등록</span>
+        <span style="font-size: 0.72rem; color: var(--text-muted);" id="modalCurrentLoggedInUser">현재 로그인: 게스트 (미등록)</span>
         <div style="display: flex; gap: 6px;">
-          <button class="action-btn btn-danger-soft" id="modalLogoutBtn" onclick="performLogout()">로그아웃</button>
-          <button class="action-btn btn-secondary" onclick="closeDeveloperModal()">닫기</button>
+          <button class="action-btn btn-secondary" onclick="closeDeveloperModal()" id="modalGuestBrowseBtn">👀 게스트로 둘러보기</button>
+          <button class="action-btn btn-danger-soft" id="modalLogoutBtn" onclick="performLogout()" style="display: none;">로그아웃</button>
         </div>
       </div>
     </div>
