@@ -1,0 +1,19 @@
+{
+  "name": "nrf5340dk-studio-controller",
+  "version": "1.0.0",
+  "description": "Nordic nRF5340 DK Board Handler, Monitor & Matter Smart Bulb Controller App",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "nordic",
+    "nrf5340",
+    "nrf5340dk",
+    "matter",
+    "nrf-connect",
+    "jlink"
+  ],
+  "author": "Antigravity",
+  "license": "MIT"
+}
