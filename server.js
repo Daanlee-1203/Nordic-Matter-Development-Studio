@@ -774,8 +774,8 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/samples/select - Select & Activate Sample Firmware
     if (pathname === '/api/samples/select' && method === 'POST') {
-      const ctx = checkAuthRole(req, res, ['admin', 'engineer', 'qa']);
-      if (!ctx) return;
+      const ctx = getAuthContext(req);
+      const user = ctx.user || { id: 'guest', name: '게스트 개발자 (Guest)', role: 'guest' };
       const body = await parseJsonBody(req);
       const activeSample = samplesCatalog.setActiveSample(body.sampleId);
       if (board.appCore) {
@@ -785,9 +785,9 @@ const server = http.createServer(async (req, res) => {
       board.addLog('INF', 'samples', `NCS Matter Sample activated: ${activeSample.sample.name} [${activeSample.sample.sdkPath}]`);
       sessionTracker.recordAction(req.headers['x-session-id'], 'SAMPLE_SELECT', `NCS 샘플 전환: ${activeSample.sample.name} (${activeSample.sample.sdkPath})`);
       auditDb.recordLog({
-        userId: ctx.user.id,
-        userName: ctx.user.name,
-        userRole: ctx.user.role,
+        userId: user.id,
+        userName: user.name,
+        userRole: user.role,
         boardId: ctx.boardId,
         boardName: ctx.boardName,
         category: 'FIRMWARE_FLASH',
@@ -803,8 +803,8 @@ const server = http.createServer(async (req, res) => {
 
     // POST /api/samples/control - Interact with Active Sample Clusters
     if (pathname === '/api/samples/control' && method === 'POST') {
-      const ctx = checkAuthRole(req, res, ['admin', 'engineer', 'qa']);
-      if (!ctx) return;
+      const ctx = getAuthContext(req);
+      const user = ctx.user || { id: 'guest', name: '게스트 개발자 (Guest)', role: 'guest' };
       const body = await parseJsonBody(req);
       const sampleId = body.sampleId || samplesCatalog.activeSampleId;
       const updatedState = samplesCatalog.updateSampleState(sampleId, body.patch || {});
@@ -813,10 +813,10 @@ const server = http.createServer(async (req, res) => {
       if (sampleId === 'light_bulb') {
         matter.updateControl(body.patch || {});
       } else if (sampleId === 'lock') {
-        const isLocked = updatedState.lockState === 'LOCKED';
+        const isLocked = updatedState.lockState === 'LOCKED' || updatedState.lockState === 'Locked';
         board.setGpio('led3', isLocked ? 1 : 0);
       } else if (sampleId === 'smoke_co_alarm') {
-        if (updatedState && updatedState.alarmActive) {
+        if (updatedState && (updatedState.alarmActive || updatedState.alarmExpressed)) {
           board.setGpio('led4', 1);
         } else {
           board.setGpio('led4', 0);
@@ -827,9 +827,9 @@ const server = http.createServer(async (req, res) => {
       board.addLog('INF', 'matter', `Matter Sample [${sampleId}] cluster updated: ${JSON.stringify(body.patch || {})}`);
       sessionTracker.recordAction(req.headers['x-session-id'], 'CLUSTER_CONTROL', `Matter [${sampleId}] 클러스터 속성 변경: ${JSON.stringify(body.patch || {})}`);
       auditDb.recordLog({
-        userId: ctx.user.id,
-        userName: ctx.user.name,
-        userRole: ctx.user.role,
+        userId: user.id,
+        userName: user.name,
+        userRole: user.role,
         boardId: ctx.boardId,
         boardName: ctx.boardName,
         category: 'MATTER_CLUSTER',

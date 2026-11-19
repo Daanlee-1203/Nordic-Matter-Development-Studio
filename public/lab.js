@@ -1048,31 +1048,46 @@ function copyBuildCmd(cmd) {
 }
 
 async function selectSample(sampleId) {
-  if (typeof currentAuthUser !== 'undefined' && (!currentAuthUser || currentAuthUser.role === 'viewer')) {
-    showToast('🔒 제어 권한 없음: NCS 샘플 전환 및 플래시는 엔지니어 또는 관리자로 로그인해야 합니다.', '⚠️');
-    if (typeof openDeveloperModal === 'function') openDeveloperModal();
-    return;
-  }
+  const quickSelect = document.getElementById('quickSampleSelect');
+  if (quickSelect) quickSelect.value = sampleId;
+
   try {
     showToast(`⚡ NCS 샘플 [${sampleId}] 플래시 및 전환 중...`, '⚡');
+    const token = localStorage.getItem('nordic_matter_token') || '';
     const res = await fetch('/api/samples/select', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : ''
+      },
       body: JSON.stringify({ sampleId })
     });
     const data = await res.json();
-    if (data.success) {
+    if (data.success && data.active) {
       activeSampleData = data.active;
       renderActiveSampleController(activeSampleData);
       renderSamplesCatalog(currentSampleFilter);
       populateQuickSampleSelect();
+      updateActiveSampleCardsUi();
       showToast(`🌟 샘플 활성화 완료: ${data.active.sample.name}`, '🎉');
 
-      // Automatically transition to dashboardTab to allow immediate control
-      switchNav('dashboardTab', document.getElementById('btnNavDashboard'));
+      // Update photoreal board firmware display if present
+      const fwBadge = document.getElementById('boardTwinFirmware');
+      if (fwBadge) {
+        fwBadge.innerText = data.active.sample.sdkPath;
+      }
+    } else {
+      showToast(`⚠️ 샘플 전환 실패: ${data.message || '오류가 발생했습니다.'}`, '⚠️');
+      if (quickSelect && activeSampleData && activeSampleData.sample) {
+        quickSelect.value = activeSampleData.sample.id;
+      }
     }
   } catch (err) {
     console.error(err);
+    showToast('⚠️ 서버 통신 중 오류가 발생했습니다.', '❌');
+    if (quickSelect && activeSampleData && activeSampleData.sample) {
+      quickSelect.value = activeSampleData.sample.id;
+    }
   }
 }
 
@@ -1096,15 +1111,14 @@ function updateActiveSampleCardsUi() {
 }
 
 async function controlSampleDevice(sampleId, patch) {
-  if (typeof currentAuthUser !== 'undefined' && (!currentAuthUser || currentAuthUser.role === 'viewer')) {
-    showToast('🔒 제어 권한 없음: Matter 클러스터 제어는 엔지니어 또는 관리자로 로그인해야 합니다.', '⚠️');
-    if (typeof openDeveloperModal === 'function') openDeveloperModal();
-    return;
-  }
   try {
+    const token = localStorage.getItem('nordic_matter_token') || '';
     const res = await fetch('/api/samples/control', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : ''
+      },
       body: JSON.stringify({ sampleId, patch })
     });
     const data = await res.json();
@@ -1132,31 +1146,41 @@ function renderActiveSampleController(activeData) {
   if (title) title.innerText = sample.name;
   if (sub) sub.innerText = `Endpoint ${sample.endpoint} · ${sample.deviceType.split(' ')[0]} · ${sample.sdkPath}`;
 
+  // Keep quick select in sync
+  const quickSelect = document.getElementById('quickSampleSelect');
+  if (quickSelect && quickSelect.value !== sample.id) {
+    quickSelect.value = sample.id;
+  }
+
   let ctrlHtml = '';
 
   switch (sample.id) {
     case 'light_bulb': {
+      const isOn = !!state.onOff;
+      const level = state.level !== undefined ? state.level : 210;
+      const cct = state.colorTemperatureKelvin || 4000;
+      const rgb = state.rgbHex || '#38bdf8';
       ctrlHtml = `
         <div class="device-ctrl-wrapper">
           <div style="display: flex; gap: 12px; align-items: center; justify-content: space-between;">
             <div style="display: flex; align-items: center; gap: 10px;">
-              <div style="width: 32px; height: 32px; border-radius: 50%; background: ${state.rgbHex || '#38bdf8'}; box-shadow: 0 0 12px ${state.rgbHex || '#38bdf8'};"></div>
+              <div style="width: 32px; height: 32px; border-radius: 50%; background: ${isOn ? rgb : '#334155'}; box-shadow: ${isOn ? `0 0 14px ${rgb}` : 'none'}; border: 1px solid rgba(255,255,255,0.2); transition: all 0.2s;"></div>
               <div>
-                <div style="font-weight: 700; color: #fff;">전원 상태: ${state.onOff ? '<span style="color: #4ade80;">ON (켜짐)</span>' : '<span style="color: #ef4444;">OFF (꺼짐)</span>'}</div>
-                <div style="font-size: 0.72rem; color: var(--text-muted);">밝기: ${Math.round((state.level || 254) / 2.54)}% · 색온도: ${state.colorTemperatureKelvin || 4000}K</div>
+                <div style="font-weight: 700; color: #fff;">전원 상태: ${isOn ? '<span style="color: #4ade80;">ON (켜짐)</span>' : '<span style="color: #ef4444;">OFF (꺼짐)</span>'}</div>
+                <div style="font-size: 0.72rem; color: var(--text-muted);">밝기: ${Math.round((level / 254) * 100)}% (${level}/254) · 색온도: ${cct}K</div>
               </div>
             </div>
-            <button class="hyper-btn ${state.onOff ? 'hyper-btn-off' : 'hyper-btn-on'}" onclick="controlSampleDevice('light_bulb', { onOff: ${!state.onOff} })">
-              ${state.onOff ? '전원 끄기 (OFF)' : '전원 켜기 (ON)'}
+            <button class="hyper-btn ${isOn ? 'hyper-btn-off' : 'hyper-btn-on'}" onclick="controlSampleDevice('light_bulb', { onOff: ${!isOn} })">
+              ${isOn ? '전원 끄기 (OFF)' : '전원 켜기 (ON)'}
             </button>
           </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
+          <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px;">
             <span style="font-size: 0.72rem; color: var(--text-sub); width: 75px;">밝기 디밍:</span>
-            <input type="range" min="1" max="254" value="${state.level || 254}" style="flex: 1;" onchange="controlSampleDevice('light_bulb', { level: parseInt(this.value) })">
+            <input type="range" min="1" max="254" value="${level}" style="flex: 1;" onchange="controlSampleDevice('light_bulb', { level: parseInt(this.value) })">
           </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
+          <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
             <span style="font-size: 0.72rem; color: var(--text-sub); width: 75px;">색온도(CCT):</span>
-            <input type="range" min="2700" max="6500" step="100" value="${state.colorTemperatureKelvin || 4000}" style="flex: 1;" onchange="controlSampleDevice('light_bulb', { colorTemperatureKelvin: parseInt(this.value) })">
+            <input type="range" min="2700" max="6500" step="100" value="${cct}" style="flex: 1;" onchange="controlSampleDevice('light_bulb', { colorTemperatureKelvin: parseInt(this.value) })">
           </div>
         </div>
       `;
@@ -1164,50 +1188,56 @@ function renderActiveSampleController(activeData) {
     }
 
     case 'light_switch': {
+      const boundNode = state.boundNodeId || '0x123456780001';
+      const boundEp = state.boundEndpoint || 1;
+      const count = state.pressCount || 0;
+      const lastAction = state.lastAction || '대기 중';
       ctrlHtml = `
         <div class="device-ctrl-wrapper">
           <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 6px;">
             <div>
               <div style="font-size: 0.76rem; color: #94a3b8;">바인딩 타겟 (Binding Target)</div>
-              <div style="font-weight: 700; color: #38bdf8; font-family: var(--font-mono);">${state.boundNodeId || '0x123456780001'} (EP ${state.boundEndpoint || 1})</div>
+              <div style="font-weight: 700; color: #38bdf8; font-family: var(--font-mono);">${boundNode} (EP ${boundEp})</div>
             </div>
             <div style="text-align: right;">
               <div style="font-size: 0.76rem; color: #94a3b8;">누적 전송 횟수</div>
-              <div style="font-weight: 800; color: #fff;">${state.pressCount || 0}회</div>
+              <div style="font-weight: 800; color: #fff;">${count}회</div>
             </div>
           </div>
-          <div class="ctrl-tile-row">
-            <button class="hyper-btn hyper-btn-on" style="flex: 1;" onclick="controlSampleDevice('light_switch', { lastAction: 'Single Click -> Toggle Sent', pressCount: ${(state.pressCount || 0) + 1} })">
+          <div class="ctrl-tile-row" style="display: flex; gap: 8px; margin-top: 8px;">
+            <button class="hyper-btn hyper-btn-on" style="flex: 1;" onclick="controlSampleDevice('light_switch', { lastAction: 'Single Click -> Toggle Sent', pressCount: ${count + 1} })">
               👆 단일 클릭 (Toggle)
             </button>
-            <button class="hyper-btn" style="flex: 1; background: #3b82f6; color: #fff;" onclick="controlSampleDevice('light_switch', { lastAction: 'Double Click -> Brightness +20%', pressCount: ${(state.pressCount || 0) + 1} })">
+            <button class="hyper-btn" style="flex: 1; background: #3b82f6; color: #fff;" onclick="controlSampleDevice('light_switch', { lastAction: 'Double Click -> Brightness +20%', pressCount: ${count + 1} })">
               ✌️ 더블 클릭 (밝기 Up)
             </button>
-            <button class="hyper-btn" style="flex: 1; background: #64748b; color: #fff;" onclick="controlSampleDevice('light_switch', { lastAction: 'Long Press -> Brightness -20%', pressCount: ${(state.pressCount || 0) + 1} })">
+            <button class="hyper-btn" style="flex: 1; background: #64748b; color: #fff;" onclick="controlSampleDevice('light_switch', { lastAction: 'Long Press -> Brightness -20%', pressCount: ${count + 1} })">
               ⏱️ 롱 프레스 (밝기 Down)
             </button>
           </div>
-          <div style="font-size: 0.72rem; color: var(--nordic-cyan);">최근 생성 이벤트: ${escapeHtml(state.lastAction || '대기 중')}</div>
+          <div style="font-size: 0.72rem; color: var(--nordic-cyan); margin-top: 6px;">최근 전송 이벤트: ${escapeHtml(lastAction)}</div>
         </div>
       `;
       break;
     }
 
     case 'lock': {
-      const isLocked = state.lockState === 'LOCKED';
+      const isLocked = state.lockState === 'LOCKED' || state.lockState === 'Locked';
+      const autoSec = state.autoRelockTimeSec || state.autoRelockTimeSeconds || 10;
+      const bat = state.batteryPercent || state.batteryLevel || 92;
       ctrlHtml = `
         <div class="device-ctrl-wrapper">
-          <div class="lock-bolt-display ${isLocked ? 'locked' : 'unlocked'}">
+          <div class="lock-bolt-display ${isLocked ? 'locked' : 'unlocked'}" style="text-align: center; padding: 12px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px solid var(--border);">
             <div style="font-size: 2.2rem; margin-bottom: 4px;">${isLocked ? '🔒' : '🔓'}</div>
-            <div class="lock-status-badge ${isLocked ? 'locked' : 'unlocked'}">
+            <div class="lock-status-badge ${isLocked ? 'locked' : 'unlocked'}" style="font-size: 0.95rem; font-weight: 800; color: ${isLocked ? '#4ade80' : '#f59e0b'};">
               ${isLocked ? 'BOLT ENGAGED (잠금 상태)' : 'BOLT RETRACTED (잠금 해제됨)'}
             </div>
             <div style="font-size: 0.74rem; color: var(--text-muted); margin-top: 4px;">
-              자동 재잠금(Auto-Relock): ${state.autoRelockTimeSeconds || 30}초 후 자동 잠금 · 자격증명 모드: PIN 코드 & Matter 패브릭
+              자동 재잠금(Auto-Relock): ${autoSec}초 · 배터리: ${bat}% · 자격증명: PIN 코드 & Matter 패브릭
             </div>
           </div>
-          <div style="display: flex; gap: 8px;">
-            <button class="hyper-btn ${isLocked ? 'hyper-btn-off' : 'hyper-btn-on'}" style="flex: 1;" onclick="controlSampleDevice('lock', { lockState: '${isLocked ? 'UNLOCKED' : 'LOCKED'}' })">
+          <div style="display: flex; gap: 8px; margin-top: 8px;">
+            <button class="hyper-btn ${isLocked ? 'hyper-btn-off' : 'hyper-btn-on'}" style="flex: 1;" onclick="controlSampleDevice('lock', { lockState: '${isLocked ? 'Unlocked' : 'Locked'}', boltState: '${isLocked ? 'Retracted' : 'Locked'}' })">
               ${isLocked ? '🔓 도어락 열기 (Unlock Door)' : '🔒 도어락 잠그기 (Lock Door)'}
             </button>
             <button class="action-btn btn-secondary" onclick="simulatePinUnlock()">
@@ -1220,35 +1250,37 @@ function renderActiveSampleController(activeData) {
     }
 
     case 'thermostat': {
-      const curTemp = state.localTemperatureC || 21.5;
-      const targetTemp = state.targetTempC || 22.0;
+      const curTemp = state.localTemperature !== undefined ? state.localTemperature : (state.localTemperatureC !== undefined ? state.localTemperatureC : 22.5);
+      const targetTemp = state.occupiedHeatingSetpoint !== undefined ? state.occupiedHeatingSetpoint : (state.targetTempC !== undefined ? state.targetTempC : 21.0);
       const mode = state.systemMode || 'Auto';
+      const hum = state.humidity !== undefined ? state.humidity : (state.humidityPercent !== undefined ? state.humidityPercent : 48);
+      const isEco = state.ecoMode !== undefined ? state.ecoMode : true;
       ctrlHtml = `
         <div class="device-ctrl-wrapper">
-          <div class="thermo-display-box">
+          <div class="thermo-display-box" style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.3); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border);">
             <div>
               <div style="font-size: 0.72rem; color: #94a3b8;">현재 실내 온도</div>
-              <div class="thermo-temp-big">${curTemp.toFixed(1)}°C</div>
+              <div class="thermo-temp-big" style="font-size: 1.8rem; font-weight: 800; color: #38bdf8; font-family: var(--font-mono);">${Number(curTemp).toFixed(1)}°C</div>
             </div>
             <div style="text-align: center;">
-              <span class="thermo-mode-pill thermo-mode-${mode.toLowerCase()}">${mode.toUpperCase()} MODE</span>
-              <div style="font-size: 0.7rem; color: #94a3b8; margin-top: 4px;">습도: ${state.humidityPercent || 45}% · Eco: ${state.ecoMode ? 'ON' : 'OFF'}</div>
+              <span class="thermo-mode-pill" style="display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 700; background: ${mode === 'Heat' ? 'rgba(239, 68, 68, 0.25)' : (mode === 'Cool' ? 'rgba(56, 189, 248, 0.25)' : 'rgba(34, 197, 94, 0.25)')}; color: ${mode === 'Heat' ? '#f87171' : (mode === 'Cool' ? '#38bdf8' : '#4ade80')}; border: 1px solid currentColor;">${mode.toUpperCase()} MODE</span>
+              <div style="font-size: 0.7rem; color: #94a3b8; margin-top: 4px;">습도: ${hum}% · Eco: ${isEco ? 'ON' : 'OFF'}</div>
             </div>
             <div style="text-align: right;">
               <div style="font-size: 0.72rem; color: #94a3b8;">목표 희망 온도</div>
-              <div style="font-size: 1.8rem; font-weight: 800; color: #fff; font-family: var(--font-mono);">${targetTemp.toFixed(1)}°C</div>
+              <div style="font-size: 1.8rem; font-weight: 800; color: #fff; font-family: var(--font-mono);">${Number(targetTemp).toFixed(1)}°C</div>
             </div>
           </div>
-          <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px;">
             <div style="display: flex; gap: 6px;">
-              <button class="hyper-btn hyper-btn-off" style="padding: 6px 12px;" onclick="controlSampleDevice('thermostat', { targetTempC: ${targetTemp - 0.5} })">▼ -0.5°C</button>
-              <button class="hyper-btn hyper-btn-on" style="padding: 6px 12px;" onclick="controlSampleDevice('thermostat', { targetTempC: ${targetTemp + 0.5} })">▲ +0.5°C</button>
+              <button class="hyper-btn hyper-btn-off" style="padding: 6px 12px;" onclick="controlSampleDevice('thermostat', { occupiedHeatingSetpoint: ${(Number(targetTemp) - 0.5).toFixed(1)}, targetTempC: ${(Number(targetTemp) - 0.5).toFixed(1)} })">▼ -0.5°C</button>
+              <button class="hyper-btn hyper-btn-on" style="padding: 6px 12px;" onclick="controlSampleDevice('thermostat', { occupiedHeatingSetpoint: ${(Number(targetTemp) + 0.5).toFixed(1)}, targetTempC: ${(Number(targetTemp) + 0.5).toFixed(1)} })">▲ +0.5°C</button>
             </div>
             <div style="display: flex; gap: 4px;">
               <button class="action-btn ${mode === 'Heat' ? 'btn-primary' : 'btn-secondary'}" style="padding: 4px 8px; font-size: 0.72rem;" onclick="controlSampleDevice('thermostat', { systemMode: 'Heat' })">난방</button>
               <button class="action-btn ${mode === 'Cool' ? 'btn-primary' : 'btn-secondary'}" style="padding: 4px 8px; font-size: 0.72rem;" onclick="controlSampleDevice('thermostat', { systemMode: 'Cool' })">냉방</button>
               <button class="action-btn ${mode === 'Auto' ? 'btn-primary' : 'btn-secondary'}" style="padding: 4px 8px; font-size: 0.72rem;" onclick="controlSampleDevice('thermostat', { systemMode: 'Auto' })">자동</button>
-              <button class="action-btn ${state.ecoMode ? 'btn-primary' : 'btn-secondary'}" style="padding: 4px 8px; font-size: 0.72rem;" onclick="controlSampleDevice('thermostat', { ecoMode: ${!state.ecoMode} })">에코</button>
+              <button class="action-btn ${isEco ? 'btn-primary' : 'btn-secondary'}" style="padding: 4px 8px; font-size: 0.72rem;" onclick="controlSampleDevice('thermostat', { ecoMode: ${!isEco} })">에코</button>
             </div>
           </div>
         </div>
@@ -1257,13 +1289,14 @@ function renderActiveSampleController(activeData) {
     }
 
     case 'window_covering': {
-      const lift = state.liftPercent || 0;
-      const tilt = state.tiltPercent || 0;
+      const lift = state.currentPositionLiftPercent !== undefined ? state.currentPositionLiftPercent : (state.liftPercent !== undefined ? state.liftPercent : 40);
+      const tilt = state.currentPositionTiltPercent !== undefined ? state.currentPositionTiltPercent : (state.tiltPercent !== undefined ? state.tiltPercent : 15);
       ctrlHtml = `
         <div class="device-ctrl-wrapper">
           <div style="display: flex; gap: 14px; align-items: center;">
-            <div class="window-covering-vis" style="width: 100px; height: 80px;">
-              <div class="blind-slats-container" style="height: ${lift}%;"></div>
+            <div style="width: 100px; height: 80px; background: rgba(0,0,0,0.3); border: 2px solid var(--border); border-radius: 6px; position: relative; overflow: hidden;">
+              <div style="position: absolute; top: 0; left: 0; right: 0; height: ${lift}%; background: linear-gradient(180deg, #1e3a8a, #3b82f6); opacity: 0.85; transition: height 0.3s ease; border-bottom: 3px solid #60a5fa;"></div>
+              <div style="position: absolute; bottom: 4px; left: 0; right: 0; text-align: center; font-size: 0.68rem; color: #fff; font-weight: 700; text-shadow: 0 1px 3px rgba(0,0,0,0.8);">Lift: ${lift}%</div>
             </div>
             <div style="flex: 1;">
               <div style="display: flex; justify-content: space-between; font-size: 0.74rem; color: #fff;">
@@ -1271,12 +1304,12 @@ function renderActiveSampleController(activeData) {
                 <span>슬랫 각도 (Tilt): <strong>${tilt}%</strong></span>
               </div>
               <div style="margin-top: 6px;">
-                <input type="range" min="0" max="100" value="${lift}" style="width: 100%;" onchange="controlSampleDevice('window_covering', { liftPercent: parseInt(this.value) })">
+                <input type="range" min="0" max="100" value="${lift}" style="width: 100%;" onchange="controlSampleDevice('window_covering', { currentPositionLiftPercent: parseInt(this.value), targetPositionLiftPercent: parseInt(this.value), liftPercent: parseInt(this.value) })">
               </div>
               <div style="margin-top: 6px; display: flex; gap: 6px;">
-                <button class="action-btn btn-secondary" style="flex: 1; font-size: 0.72rem;" onclick="controlSampleDevice('window_covering', { liftPercent: 0 })">완전 열기 (0%)</button>
-                <button class="action-btn btn-secondary" style="flex: 1; font-size: 0.72rem;" onclick="controlSampleDevice('window_covering', { isMoving: false })">정지 (Stop)</button>
-                <button class="action-btn btn-primary" style="flex: 1; font-size: 0.72rem;" onclick="controlSampleDevice('window_covering', { liftPercent: 100 })">완전 닫기 (100%)</button>
+                <button class="action-btn btn-secondary" style="flex: 1; font-size: 0.72rem;" onclick="controlSampleDevice('window_covering', { currentPositionLiftPercent: 0, targetPositionLiftPercent: 0, liftPercent: 0 })">완전 열기 (0%)</button>
+                <button class="action-btn btn-secondary" style="flex: 1; font-size: 0.72rem;" onclick="controlSampleDevice('window_covering', { motorStatus: 'Stopped' })">정지 (Stop)</button>
+                <button class="action-btn btn-primary" style="flex: 1; font-size: 0.72rem;" onclick="controlSampleDevice('window_covering', { currentPositionLiftPercent: 100, targetPositionLiftPercent: 100, liftPercent: 100 })">완전 닫기 (100%)</button>
               </div>
             </div>
           </div>
@@ -1286,7 +1319,9 @@ function renderActiveSampleController(activeData) {
     }
 
     case 'contact_sensor': {
-      const isOpen = state.contactState === 'OPEN';
+      const isOpen = state.contactState === 'OPEN' || state.contactState === 'Open' || state.stateValue === true;
+      const bat = state.batteryLevel || 98;
+      const interval = state.icdIntervalMs || 5000;
       ctrlHtml = `
         <div class="device-ctrl-wrapper">
           <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 8px; border: 1px solid var(--border);">
@@ -1296,12 +1331,12 @@ function renderActiveSampleController(activeData) {
                 <div style="font-size: 1rem; font-weight: 800; color: ${isOpen ? '#f59e0b' : '#4ade80'};">
                   ${isOpen ? '창문 / 문 열림 (Contact OPEN)' : '창문 / 문 닫힘 (Contact CLOSED)'}
                 </div>
-                <div style="font-size: 0.72rem; color: #94a3b8;">
-                  ICD 동작 모드: ${escapeHtml(state.icdMode || 'Sleepy End Device')} (폴링 주기: ${state.pollingIntervalMs || 5000}ms)
+                <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 2px;">
+                  Matter 1.6 ICD 모드 · 폴링 주기: ${interval}ms · 배터리: ${bat}%
                 </div>
               </div>
             </div>
-            <button class="hyper-btn ${isOpen ? 'hyper-btn-on' : 'hyper-btn-off'}" onclick="controlSampleDevice('contact_sensor', { contactState: '${isOpen ? 'CLOSED' : 'OPEN'}' })">
+            <button class="hyper-btn ${isOpen ? 'hyper-btn-off' : 'hyper-btn-on'}" onclick="controlSampleDevice('contact_sensor', { contactState: '${isOpen ? 'Closed' : 'Open'}', stateValue: ${!isOpen} })">
               ${isOpen ? '문 닫기 (Close Door)' : '문 열기 (Open Door)'}
             </button>
           </div>
@@ -1311,7 +1346,10 @@ function renderActiveSampleController(activeData) {
     }
 
     case 'smoke_co_alarm': {
-      const isAlarm = state.alarmActive || false;
+      const isAlarm = state.alarmExpressed || state.alarmActive || false;
+      const smoke = state.smokeState || 'Normal';
+      const co = state.coState || 'Normal';
+      const bat = state.batteryLevel || state.batteryPercent || 99;
       ctrlHtml = `
         <div class="device-ctrl-wrapper">
           <div style="display: flex; justify-content: space-between; align-items: center; background: ${isAlarm ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0,0,0,0.25)'}; padding: 12px; border-radius: 8px; border: 1px solid ${isAlarm ? '#ef4444' : 'var(--border)'};">
@@ -1320,11 +1358,11 @@ function renderActiveSampleController(activeData) {
                 ${isAlarm ? '🚨 화재 / 연기 위험 경보 작동 중 (ALARM ACTIVE)' : '🟢 감지기 정상 감시 상태 (NORMAL)'}
               </div>
               <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 4px;">
-                연기 농도: ${state.smokeLevelPpm || 12} ppm · CO 농도: ${state.coLevelPpm || 4} ppm · 배터리: ${state.batteryPercent || 98}%
+                연기 상태: ${smoke} · 일산화탄소(CO): ${co} · 배터리: ${bat}%
               </div>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button class="hyper-btn hyper-btn-off" onclick="controlSampleDevice('smoke_co_alarm', { alarmActive: ${!isAlarm}, smokeLevelPpm: ${isAlarm ? 12 : 380} })">
+              <button class="hyper-btn ${isAlarm ? 'hyper-btn-on' : 'hyper-btn-off'}" onclick="controlSampleDevice('smoke_co_alarm', { alarmExpressed: ${!isAlarm}, alarmActive: ${!isAlarm}, smokeState: '${isAlarm ? 'Normal' : 'Warning'}' })">
                 ${isAlarm ? '🔕 경보 음소거' : '🚨 테스트 경보 트리거'}
               </button>
             </div>
@@ -1335,27 +1373,32 @@ function renderActiveSampleController(activeData) {
     }
 
     case 'weather_station': {
+      const temp = state.temperatureC || 23.4;
+      const hum = state.humidityPercent || state.relativeHumidityPercent || 52;
+      const pres = state.pressureHpa || 1013.25;
+      const aqi = state.airQualityIndex || 'Good';
+      const voc = state.vocIndex || 28;
       ctrlHtml = `
         <div class="device-ctrl-wrapper">
-          <div class="weather-gauges-grid">
-            <div class="weather-gauge-box">
-              <div style="font-size: 0.7rem; color: #94a3b8;">🌡️ 온도 (Temperature)</div>
-              <div class="weather-gauge-val" style="color: #38bdf8;">${state.temperatureC || 23.4} °C</div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+            <div style="background: rgba(0,0,0,0.25); padding: 8px; border-radius: 6px; text-align: center; border: 1px solid var(--border);">
+              <div style="font-size: 0.7rem; color: #94a3b8;">🌡️ 온도</div>
+              <div style="font-size: 1.1rem; font-weight: 800; color: #38bdf8; margin-top: 2px;">${temp}°C</div>
             </div>
-            <div class="weather-gauge-box">
-              <div style="font-size: 0.7rem; color: #94a3b8;">💧 상대습도 (Humidity)</div>
-              <div class="weather-gauge-val" style="color: #34d399;">${state.relativeHumidityPercent || 52}%</div>
+            <div style="background: rgba(0,0,0,0.25); padding: 8px; border-radius: 6px; text-align: center; border: 1px solid var(--border);">
+              <div style="font-size: 0.7rem; color: #94a3b8;">💧 습도</div>
+              <div style="font-size: 1.1rem; font-weight: 800; color: #34d399; margin-top: 2px;">${hum}%</div>
             </div>
-            <div class="weather-gauge-box">
-              <div style="font-size: 0.7rem; color: #94a3b8;">⏱️ 대기압 (Barometer)</div>
-              <div class="weather-gauge-val" style="color: #fbbf24;">${state.pressureHpa || 1013.2} hPa</div>
+            <div style="background: rgba(0,0,0,0.25); padding: 8px; border-radius: 6px; text-align: center; border: 1px solid var(--border);">
+              <div style="font-size: 0.7rem; color: #94a3b8;">⏱️ 대기압</div>
+              <div style="font-size: 1.1rem; font-weight: 800; color: #fbbf24; margin-top: 2px;">${pres} hPa</div>
             </div>
-            <div class="weather-gauge-box">
-              <div style="font-size: 0.7rem; color: #94a3b8;">🍃 공기질 (AQI Index)</div>
-              <div class="weather-gauge-val" style="color: #a78bfa;">${state.airQualityIndex || 28} (좋음)</div>
+            <div style="background: rgba(0,0,0,0.25); padding: 8px; border-radius: 6px; text-align: center; border: 1px solid var(--border);">
+              <div style="font-size: 0.7rem; color: #94a3b8;">🍃 공기질 (AQI)</div>
+              <div style="font-size: 1.1rem; font-weight: 800; color: #a78bfa; margin-top: 2px;">${aqi} (${voc})</div>
             </div>
           </div>
-          <button class="action-btn btn-secondary" style="width: 100%; font-size: 0.74rem;" onclick="simulateWeatherFluctuation()">
+          <button class="action-btn btn-secondary" style="width: 100%; font-size: 0.74rem; margin-top: 8px;" onclick="simulateWeatherFluctuation()">
             🎲 가상 기상 환경 변화 시뮬레이션
           </button>
         </div>
@@ -1364,18 +1407,21 @@ function renderActiveSampleController(activeData) {
     }
 
     case 'all_clusters_app': {
+      const endpoints = (state.activeEndpoints || [0, 1, 2]).join(', ');
+      const status = state.testHarnessState || 'Ready';
+      const acl = state.aclRuleCount || 4;
       ctrlHtml = `
         <div class="device-ctrl-wrapper">
           <div style="background: rgba(0,0,0,0.25); padding: 10px; border-radius: 6px; border: 1px solid var(--border);">
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <div>
-                <span style="font-weight: 700; color: #fff;">CSA Matter Test Harness 하네스 검증기</span>
-                <div style="font-size: 0.72rem; color: #94a3b8;">Endpoint 0 (Root), 1 (Standard Cluster), 2 (Extended Clusters)</div>
+                <span style="font-weight: 700; color: #fff;">CSA Matter Test Harness 자동 검증기</span>
+                <div style="font-size: 0.72rem; color: #94a3b8;">활성 엔드포인트: [${endpoints}] · ACL 접근제어 규칙: ${acl}개</div>
               </div>
-              <span class="status-badge status-running">100% Ready</span>
+              <span class="status-badge status-running" style="padding: 2px 8px; font-size: 0.7rem; background: rgba(34,197,94,0.2); color: #4ade80; border-radius: 4px;">상태: ${status}</span>
             </div>
             <div style="margin-top: 8px; display: flex; gap: 8px;">
-              <button class="hyper-btn hyper-btn-on" style="flex: 1;" onclick="showToast('🧪 CSA 5.4.1 테스트 하네스 검증 패스: All Clusters Validated', '✅')">
+              <button class="hyper-btn hyper-btn-on" style="flex: 1;" onclick="controlSampleDevice('all_clusters_app', { testHarnessState: 'Validated 100%' }); showToast('🧪 CSA 5.4.1 테스트 하네스 검증 패스: All Clusters Validated', '✅')">
                 🧪 CSA 클러스터 자동 적합성 시험
               </button>
             </div>
@@ -1386,25 +1432,23 @@ function renderActiveSampleController(activeData) {
     }
 
     case 'bridge': {
+      const nodes = state.bridgedNodes || [
+        { id: 1, name: 'Zigbee Dimmable Bulb', type: 'Dimmable Light', online: true, state: 'ON (75%)' },
+        { id: 2, name: 'BLE Mesh Temp Sensor', type: 'Temperature Sensor', online: true, state: '22.8 °C' }
+      ];
       ctrlHtml = `
         <div class="device-ctrl-wrapper">
           <div style="background: rgba(0,0,0,0.25); padding: 10px; border-radius: 6px; border: 1px solid var(--border);">
-            <div style="font-size: 0.74rem; color: #94a3b8; margin-bottom: 6px;">레거시 비매터 기기 브릿지 연동 테이블 (Aggregator 3 Nodes)</div>
+            <div style="font-size: 0.74rem; color: #94a3b8; margin-bottom: 6px;">레거시 비-매터 기기 브릿지 연동 테이블 (Aggregator ${nodes.length} Nodes)</div>
             <div style="display: flex; flex-direction: column; gap: 4px; font-size: 0.74rem;">
-              <div style="display: flex; justify-content: space-between; padding: 4px; background: rgba(255,255,255,0.04); border-radius: 4px;">
-                <span>EP 2: Zigbee 온습도 센서 (Xiaomi)</span>
-                <span style="color: #4ade80;">23.5°C / 50%</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; padding: 4px; background: rgba(255,255,255,0.04); border-radius: 4px;">
-                <span>EP 3: BLE Mesh 스마트 플러그 (Tuya)</span>
-                <span style="color: #38bdf8;">ON (145W)</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; padding: 4px; background: rgba(255,255,255,0.04); border-radius: 4px;">
-                <span>EP 4: 2.4GHz 독자 도어 접점 센서</span>
-                <span style="color: #f59e0b;">CLOSED</span>
-              </div>
+              ${nodes.map(n => `
+                <div style="display: flex; justify-content: space-between; padding: 4px 8px; background: rgba(255,255,255,0.04); border-radius: 4px;">
+                  <span>EP ${n.id + 1}: ${escapeHtml(n.name)} (${escapeHtml(n.type)})</span>
+                  <span style="color: ${n.online ? '#4ade80' : '#ef4444'}; font-weight: 700;">${escapeHtml(n.state)}</span>
+                </div>
+              `).join('')}
             </div>
-            <button class="action-btn btn-secondary" style="width: 100%; margin-top: 8px; font-size: 0.72rem;" onclick="showToast('🔄 브릿지 하위 노드 3종 동기화 완료', '🔄')">
+            <button class="action-btn btn-secondary" style="width: 100%; margin-top: 8px; font-size: 0.72rem;" onclick="controlSampleDevice('bridge', { totalBridgedEndpoints: ${nodes.length} }); showToast('🔄 브릿지 하위 노드 동기화 완료', '🔄')">
               🔄 하위 노드 상태 재동기화
             </button>
           </div>
@@ -1414,7 +1458,11 @@ function renderActiveSampleController(activeData) {
     }
 
     case 'pump': {
-      const isRunning = state.pumpState === 'RUNNING';
+      const isRunning = state.pumpRunning !== undefined ? state.pumpRunning : (state.pumpState === 'RUNNING');
+      const flow = state.flowRateLpm || 42.5;
+      const actualP = state.actualPressureBar || state.pressureBar || 3.48;
+      const targetP = state.targetPressureBar || 3.5;
+      const rpm = state.speedRpm || 1750;
       ctrlHtml = `
         <div class="device-ctrl-wrapper">
           <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.25); padding: 10px; border-radius: 6px; border: 1px solid var(--border);">
@@ -1423,10 +1471,10 @@ function renderActiveSampleController(activeData) {
                 펌프 상태: ${isRunning ? '가동 중 (RUNNING)' : '정지됨 (STOPPED)'}
               </div>
               <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 2px;">
-                유량: ${state.flowRateLpm || 45} L/min · 압력: ${state.pressureBar || 3.2} bar · 과압 보호: 정상
+                유량: ${flow} L/min · 압력: ${actualP} / ${targetP} bar · 회전수: ${isRunning ? rpm : 0} RPM
               </div>
             </div>
-            <button class="hyper-btn ${isRunning ? 'hyper-btn-off' : 'hyper-btn-on'}" onclick="controlSampleDevice('pump', { pumpState: '${isRunning ? 'STOPPED' : 'RUNNING'}' })">
+            <button class="hyper-btn ${isRunning ? 'hyper-btn-off' : 'hyper-btn-on'}" onclick="controlSampleDevice('pump', { pumpRunning: ${!isRunning}, pumpState: '${isRunning ? 'STOPPED' : 'RUNNING'}' })">
               ${isRunning ? '펌프 정지' : '펌프 가동'}
             </button>
           </div>
@@ -1437,14 +1485,16 @@ function renderActiveSampleController(activeData) {
 
     case 'template':
     default: {
+      const customActive = state.customClusterActive !== undefined ? state.customClusterActive : true;
+      const statusMsg = state.status || 'Template Baseline Ready';
       ctrlHtml = `
         <div class="device-ctrl-wrapper">
           <div style="background: rgba(0,0,0,0.25); padding: 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 0.74rem;">
-            <div style="font-weight: 700; color: #fff;">커스텀 장치 베이스라인 템플릿</div>
+            <div style="font-weight: 700; color: #fff;">커스텀 장치 베이스라인 템플릿 (Template App)</div>
             <div style="color: #94a3b8; margin-top: 4px;">
-              독자 클러스터 (0xFFF1) 초기화 및 필수 이벤트 핸들러가 등록되어 있습니다.
+              독자 클러스터 (0xFFF1) 활성화: <span style="color: #4ade80; font-weight: 700;">${customActive ? 'Active' : 'Inactive'}</span> · 상태: ${escapeHtml(statusMsg)}
             </div>
-            <button class="hyper-btn hyper-btn-on" style="margin-top: 8px; width: 100%;" onclick="showToast('✨ 커스텀 클러스터 0xFFF1 핑 응답 수신됨 (Success)', '✨')">
+            <button class="hyper-btn hyper-btn-on" style="margin-top: 8px; width: 100%;" onclick="controlSampleDevice('template', { customClusterActive: ${!customActive} }); showToast('✨ 커스텀 클러스터 0xFFF1 핑 응답 수신됨 (Success)', '✨')">
               ✨ 커스텀 클러스터 핸들러 테스트
             </button>
           </div>

@@ -122,8 +122,8 @@ body {
 /* LEFT SIDEBAR NAVIGATION (USER-CENTERED WORKBENCH)            */
 /* ============================================================ */
 .sidebar {
-  width: 345px;
-  min-width: 345px;
+  width: 365px;
+  min-width: 365px;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   display: flex;
@@ -275,8 +275,8 @@ body {
   font-size: 0.82rem;
   font-weight: 700;
   line-height: 1.25;
-  white-space: nowrap;
-  word-break: keep-all;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -284,8 +284,8 @@ body {
 .nav-sub {
   font-size: 0.65rem;
   color: var(--text-muted);
-  white-space: nowrap;
-  word-break: keep-all;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
   overflow: hidden;
   text-overflow: ellipsis;
 }
